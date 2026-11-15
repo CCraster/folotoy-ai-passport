@@ -2,6 +2,19 @@
 
 把 AI Passport 变成随身身份卡、全屏相册和像素小城。搭配 Passport Sync，可在卡片上查看 Codex 剩余额度、重置卡和任务进度，并在任务完成时收到提示。
 
+| 身份卡 | Codex 同步 | 像素街角 |
+| --- | --- | --- |
+| <img src="docs/screenshots/badge-navigation.png" width="190" alt="身份卡首次打开画面"> | <img src="docs/screenshots/quota-detail.png" width="190" alt="Codex 额度界面"> | <img src="docs/screenshots/city-day.png" width="190" alt="像素街角动画画面"> |
+| 在网页编辑头像和介绍 | 查看不同额度周期及重置时间 | 短按确认切换不同场景 |
+
+图为固件界面渲染，时间、电量和额度为示例。
+
+## 功能
+
+- **身份卡和全屏相册**。在手机或电脑网页编辑身份资料、裁剪图片，保存最多三张照片。关机后会记住上次显示的照片。
+- **像素动画**。在街角、公园和海湾之间切换。校时后，场景随本地时间切换白天、黄昏和夜晚。
+- **Codex 同步**。配对 Mac 后可查看剩余额度、重置卡和正在进行的任务。任务完成提示音可开关、试听和调节音量。
+
 ## 下载与刷入
 
 在 [v1.1.5 发布页](https://github.com/CCraster/folotoy-ai-passport/releases/tag/v1.1.5) 下载所需文件。
