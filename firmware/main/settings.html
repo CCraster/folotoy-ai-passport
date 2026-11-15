@@ -1,0 +1,1020 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Passport 设置</title>
+<style>
+:root {
+  font: 15px Inter, "PingFang SC", system-ui, sans-serif;
+  color: #f5f9fe;
+  background: #0a0b0d;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { max-width: 900px; margin: 0 auto; padding: 28px 20px 48px; }
+h1 { margin: 0; font-size: 26px; letter-spacing: -.8px; font-weight: 650; }
+.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+.brand svg { width: 34px; height: 34px; color: #32f08c; }
+h2 { margin: 0 0 20px; font-size: 19px; font-weight: 600; }
+section { padding: 24px; border: 1px solid #2c3037; border-radius: 20px; background: #14171b; }
+[hidden] { display: none !important; }
+nav { display: flex; gap: 6px; padding: 6px; margin-bottom: 18px; border-radius: 16px; background: #191c21; position: sticky; top: 10px; z-index: 1; }
+nav button { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 0; padding: 12px 4px; color: #a6aab5; background: transparent; border-radius: 11px; font-size: 14px; }
+nav button[aria-pressed=true] { color: #0a0b0d; background: #32f08c; }
+svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+#wifi { margin-top: 28px; padding-top: 24px; border-top: 1px solid #30343b; }
+#wifi summary { display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:600;list-style:none; }
+#wifi summary::after { content:'＋';margin-left:auto;color:#32f08c; }
+#wifi[open] summary::after { content:'−'; }
+.optional { color:#a6aab5;font-size:12px;font-weight:400;border:1px solid #454b56;padding:3px 8px;border-radius:20px; }
+#networkState { display:flex;align-items:center;gap:8px;margin-top:24px;font-size:13px;color:#a6aab5; }
+#networkState::before { content:'';width:7px;height:7px;border-radius:50%;background:#666c77; }
+#networkState[data-connected=true]::before { background:#32f08c; }
+#wifiResult[data-error=true] { color:#ffb778; }
+.network-select { display:flex;align-items:end;gap:8px; }
+.network-select label { flex:1;min-width:0;margin-bottom:0; }
+.network-select button { flex:0 0 58px;padding:14px 0; }
+#networkHint { margin:12px 0 0;color:#a6aab5;font-size:13px; }
+#connectionBanner { margin:0 0 18px;padding:12px 16px;border:1px solid #30343b;border-radius:12px;font-size:13px;color:#a6aab5; }
+#connectionBanner strong { color:#32f08c;font-weight:500; }
+#sessionError { padding:14px;border:1px solid #ffb778;border-radius:12px;color:#ffb778;margin-bottom:18px; }
+label { display: block; margin: 16px 0; color: #a6aab5; font-size: 13px; }
+input, textarea, select { font: inherit; color: #f5f9fe; }
+input:not([type=file]):not([type=checkbox]):not([type=range]), textarea, select {
+  width: 100%; display: block; margin-top: 7px; padding: 12px 14px;
+  border: 1px solid #454b56; border-radius: 12px; background: #101216;
+}
+textarea { resize: vertical; min-height: 72px; }
+input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid #32f08c; outline-offset: 3px; }
+input[type=file] { display: block; max-width: 100%; margin-top: 8px; font-size: 13px; }
+input::file-selector-button {
+  padding: 9px 12px; margin-right: 10px; border: 1px solid #454b56; border-radius: 9px;
+  font: inherit; color: #f5f9fe; background: #23382d;
+}
+button {
+  width: 100%; margin-top: 14px; padding: 13px 18px; border: 0; border-radius: 13px;
+  background: #32f08c; color: #0a0b0d; font: inherit; font-weight: 650; cursor: pointer;
+}
+button:disabled { opacity: .45; cursor: default; }
+.toggle { display: flex; align-items: center; justify-content: space-between; color: #f5f9fe; font-size: 15px; }
+.toggle input { width: 20px; height: 20px; accent-color: #32f08c; }
+input[type=range] { display: block; width: 100%; margin-top: 16px; accent-color: #32f08c; }
+.setting-value { float: right; color: #f5f9fe; font-variant-numeric: tabular-nums; }
+.hint { color: #a6aab5; font-size: 13px; line-height: 1.6; }
+.actions { display: flex; gap: 10px; }
+.photo-slots { display: flex; gap: 8px; margin: 0 0 16px; }
+.photo-slots button { margin: 0; padding: 10px 4px; font-size: 13px; background: #30343b; color: #f5f9fe; }
+.photo-slots button[data-current=true]::after { content: " · 展示中"; font-size: 11px; color: #32f08c; }
+.photo-slots button[aria-pressed=true] { background: #23382d; color: #32f08c; box-shadow: inset 0 0 0 1px #32f08c; }
+.secondary { color: #f5f9fe; background: #30343b; }
+.preview { display: grid; place-items: center; padding: 18px; border: 1px solid #30343b; border-radius: 18px; background: #0a0b0d; }
+#identity .preview { height: 228px; overflow: hidden; align-items: start; }
+canvas { display: block; max-width: 100%; height: auto; background: #0a0b0d; border-radius: 12px; }
+output:not(:empty) { display: block; margin-top: 12px; color: #32f08c; font-size: 13px; }
+@media (min-width: 720px) {
+  .editor { display: grid; grid-template-columns: 280px 1fr; gap: 32px; align-items: start; }
+  .fields label:first-child { margin-top: 0; }
+  #music, #device { max-width: 640px; margin: 0 auto; }
+}
+@media (max-width: 380px) { body { padding: 24px 12px; } section { padding: 18px; } }
+.crop-dialog { width:min(460px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;border:1px solid #353a43;border-radius:24px;padding:22px;background:#14171b;color:#f5f9fe; }
+.crop-dialog::backdrop { background:#000b;backdrop-filter:blur(8px); }
+.crop-heading { display:flex;align-items:center;justify-content:space-between;margin-bottom:16px; }
+.crop-heading h2 { margin:0; }
+.crop-heading button { width:34px;height:34px;margin:0;padding:0;border-radius:50%;background:#30343b;color:#f5f9fe; }
+#cropPreview { width:auto;max-width:100%;max-height:52dvh;margin:auto;touch-action:none;cursor:grab;border-radius:12px; }
+#cropPreview:active { cursor:grabbing; }
+.crop-zoom { display:flex;gap:14px;align-items:center;margin:16px 0; }
+.crop-zoom input { margin:0; }
+.crop-help { text-align:center;color:#a6aab5;font-size:12px;margin:12px 0 0; }
+.edit-crop { width:auto;padding:8px 12px;margin:6px 0 0;font-size:13px;background:#23382d;color:#32f08c; }
+</style>
+<div class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="2" width="18" height="20" rx="5"/><circle cx="9" cy="10" r="1"/><circle cx="15" cy="10" r="1"/><path d="M9 15h6"/></svg><h1>Passport</h1></div>
+<nav aria-label="设置类别">
+<button id="navIdentity" aria-controls="identity" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="3"/><circle cx="8" cy="10" r="2"/><path d="M5 16c0-4 6-4 6 0m4-7h4m-4 5h4"/></svg>身份</button>
+<button id="navPhotos" aria-controls="photos" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m4 18 5-5 3 3 5-7 4 6"/></svg>照片</button>
+<button id="navMusic" aria-controls="music" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 17V5l11-2v12M9 8l11-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="17" cy="16" rx="3" ry="2"/></svg>声音</button>
+<button id="navDevice" aria-controls="device" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h7m5 0h4M4 17h2m5 0h9"/><circle cx="13" cy="7" r="3"/><circle cx="8" cy="17" r="3"/></svg>设备</button>
+</nav>
+<main>
+<div id="sessionError" hidden role="alert"></div>
+<div id="connectionBanner"><strong>本地设置</strong> · 修改会保存到卡片</div>
+<section id="identity">
+<h2>身份卡</h2>
+<div class="editor">
+<div class="preview"><canvas id="badge" width="240" height="280" aria-label="身份卡预览"></canvas></div>
+<div class="fields">
+<label>头像<input id="avatar" type="file" accept="image/*" disabled></label>
+<button id="editAvatar" class="edit-crop" hidden>调整裁剪</button>
+<label>主名<input id="name" maxlength="32" disabled></label>
+<label>副标题<input id="subtitle" maxlength="40" disabled></label>
+<label>补充信息<textarea id="bio" maxlength="100" rows="2" disabled></textarea></label>
+<button id="saveBadge" disabled>保存身份卡</button>
+<output id="badgeResult" aria-live="polite"></output>
+<button id="badgeRetry" class="secondary" hidden>重新加载</button>
+</div></div>
+</section>
+<section id="photos" hidden>
+<h2>全屏照片</h2>
+<div id="photoSlots" class="photo-slots" role="group" aria-label="选择照片位置"></div>
+<div class="editor">
+<div class="preview"><canvas id="photoPreview" width="240" height="320" aria-label="全屏照片预览"></canvas></div>
+<div class="fields">
+<label>照片<input id="photo" type="file" accept="image/*" disabled></label>
+<button id="editPhoto" class="edit-crop" hidden>调整裁剪</button>
+<div class="actions"><button id="savePhoto" disabled>保存照片</button>
+<button id="deletePhoto" class="secondary" hidden>删除</button></div>
+<output id="photoResult" aria-live="polite"></output>
+<button id="photoRetry" class="secondary" hidden>重新加载</button>
+</div></div>
+</section>
+<section id="music" hidden>
+<h2>开机音乐</h2>
+<label class="toggle">开机播放<input id="musicEnabled" type="checkbox" disabled></label>
+<label>旋律<select id="musicSelection" disabled></select></label>
+<div id="customMusic" hidden>
+<label>导入乐谱<input id="musicFile" type="file" accept=".rtttl,.txt,text/plain" disabled></label>
+<label>RTTTL 乐谱<textarea id="musicScore" rows="3" maxlength="1024" spellcheck="false" autocapitalize="none" autocorrect="off" disabled></textarea></label>
+</div>
+<div class="actions">
+<button id="previewMusic" class="secondary" disabled>试听</button>
+<button id="stopMusic" class="secondary" disabled>停止</button>
+</div>
+<button id="saveMusic" disabled>保存音乐</button>
+<output id="musicResult" aria-live="polite"></output>
+<button id="musicRetry" class="secondary" hidden>重新加载</button>
+</section>
+<section id="device" hidden>
+<h2>设备设置</h2>
+<details><summary>存储空间 <span id="storageTotal" class="optional">读取中</span></summary>
+<progress id="storageBar" max="1" value="0" style="width:100%;accent-color:#32f08c;margin-top:16px"></progress>
+<p id="storageDetail" class="hint"></p></details>
+<label>亮度<span id="brightnessValue" class="setting-value"></span><input id="brightness" type="range" min="10" max="100" step="10" disabled></label>
+<label>音量<span id="volumeValue" class="setting-value"></span><input id="volume" type="range" min="0" max="100" step="10" disabled></label>
+<label>息屏时间<select id="sleepSeconds" disabled><option value="30">30 秒</option><option value="60">1 分钟</option><option value="180">3 分钟</option><option value="300">5 分钟</option><option value="0">常亮</option></select></label>
+<label>待机模式<select id="powerMode" disabled><option value="0">桌面常连</option><option value="1">随身省电</option></select></label>
+<label id="deepSleepSetting" hidden>自动休眠<select id="deepSleepSeconds" disabled><option value="300">5 分钟</option><option value="900">15 分钟</option><option value="1800">30 分钟</option></select></label>
+<p id="powerHint" class="hint"></p>
+<button id="saveDevice" disabled>保存设备设置</button>
+<output id="deviceResult" aria-live="polite"></output>
+<button id="deviceRetry" class="secondary" hidden>重新加载</button>
+<button id="openBackup" class="secondary">资料备份…</button>
+<div id="networkState">正在读取连接状态…</div>
+<details id="wifi" hidden>
+<summary>连接家里 Wi-Fi <span class="optional">可选</span></summary>
+<p id="networkHint">当前热点可直接改资料、传图。</p>
+<div class="network-select"><label>附近的 2.4 GHz 网络<select id="networks"><option value="">选择网络</option><option value="__manual">手动输入名称</option></select></label><button id="scanWifi" class="secondary" type="button" aria-label="刷新 Wi-Fi 列表">刷新</button></div>
+<label id="manualNetwork" hidden>网络名称<input id="ssid" maxlength="32" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
+<label id="wifiPassword">密码<input id="password" type="password" autocomplete="off" maxlength="63" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
+<button id="saveWifi" disabled>连接并保存</button>
+<output id="wifiResult" aria-live="polite"></output>
+</details>
+</section>
+</main>
+<dialog id="cropDialog" class="crop-dialog" aria-labelledby="cropTitle">
+<div class="crop-heading"><h2 id="cropTitle">裁剪图片</h2><button id="cancelCrop" aria-label="取消裁剪">×</button></div>
+<canvas id="cropPreview" aria-label="拖动图片调整裁剪位置" tabindex="0"></canvas>
+<p class="crop-help">拖动位置 · 双指缩放</p>
+<label class="crop-zoom"><span>−</span><input id="cropZoom" aria-label="裁剪缩放" type="range" min="1" max="4" step="0.01" value="1"><span>＋</span></label>
+<div class="actions"><button id="centerCrop" class="secondary">居中</button><button id="applyCrop">使用裁剪</button></div>
+</dialog>
+<dialog id="backupDialog" class="crop-dialog" aria-labelledby="backupTitle">
+<div class="crop-heading"><h2 id="backupTitle">资料备份</h2><button id="closeBackup" aria-label="关闭">×</button></div>
+<p class="hint">身份卡、照片、开机音乐和显示设置</p>
+<div class="actions">
+<button id="exportBackup">导出备份</button>
+<button id="chooseBackup" class="secondary">选择备份文件</button>
+</div>
+<input id="backupFile" type="file" accept=".json,application/json" hidden>
+<button id="restoreBackup" hidden>恢复到卡片</button>
+<output id="backupResult" aria-live="polite"></output>
+</dialog>
+<script>
+const byId = id => document.getElementById(id);
+const query = location.search;
+const badge = byId('badge');
+const photo = byId('photoPreview');
+const avatar = document.createElement('canvas');
+avatar.width = 112;
+avatar.height = 176;
+const badgeButton = byId('saveBadge');
+const photoButton = byId('savePhoto'), photoInput = byId('photo');
+const photoSlots = byId('photoSlots'), photoDelete = byId('deletePhoto'), photoResult = byId('photoResult');
+let photoIndex = 0, photoMask = 0, photoSelected = 0, photoBusy = false, photoDraft = false;
+const nameInput = byId('name'), subtitleInput = byId('subtitle');
+const bioInput = byId('bio'), avatarInput = byId('avatar');
+const encoder = new TextEncoder();
+
+// 首次切到某页才加载该页，之后切换保留未保存的内容。
+const panels = [['navIdentity', 'identity'], ['navPhotos', 'photos'], ['navMusic', 'music'], ['navDevice', 'device']];
+for (const [button, panel] of panels) byId(button).onclick = () => {
+  for (const [otherButton, otherPanel] of panels) {
+    byId(otherButton).setAttribute('aria-pressed', String(otherButton === button));
+    byId(otherPanel).hidden = otherPanel !== panel;
+  }
+  loadPanel(panel);
+};
+
+// BEGIN REQUEST QUEUE
+// 响应体全部读完才释放队列：fetch 返回响应头时，图片通常仍在传输。
+// 仅只读请求自动重试；保存超时可能已写入，留给用户查看结果后决定。
+function createRequestQueue(fetcher, {readTimeout = 25000, writeTimeout = 30000, retryDelay = 500} = {}) {
+  let tail = Promise.resolve();
+  return function enqueue(url, options = {}) {
+    const read = !options.method || options.method.toUpperCase() === 'GET';
+    const run = async () => {
+      for (let attempt = 0; ; attempt++) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), read ? readTimeout : writeTimeout);
+        try {
+          const response = await fetcher(url, {...options, signal:controller.signal});
+          const body = await response.arrayBuffer();
+          if (!response.ok) {
+            const error = new Error(new TextDecoder().decode(body) || '请求失败，请重试');
+            error.status = response.status;
+            throw error;
+          }
+          // 返回内存中的响应，调用方的 json/text/arrayBuffer 不再占用设备连接。
+          return new Response(response.status === 204 ? null : body, {status:response.status, headers:response.headers});
+        } catch (error) {
+          const interrupted = error.name === 'AbortError' || error instanceof TypeError;
+          if (interrupted && read && attempt === 0) {
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            continue;
+          }
+          if (interrupted) throw new Error(read ? '连接中断，请检查与卡片的连接后重试' : '连接中断，保存结果未确认，请查看卡片后重试');
+          throw error;
+        } finally { clearTimeout(timer); }
+      }
+    };
+    const result = tail.then(run);
+    tail = result.catch(() => {});
+    return result;
+  };
+}
+// END REQUEST QUEUE
+const queuedRequest = createRequestQueue(fetch.bind(window));
+async function request(path, options) {
+  try { return await queuedRequest(path + query, options); }
+  catch (error) {
+    if (error.status === 403) {
+      byId('sessionError').hidden = false;
+      byId('sessionError').textContent = error.message;
+    }
+    throw error;
+  }
+}
+
+function wrap(ctx, text, width, maxLines) {
+  const lines = [];
+  let line = '';
+  for (const character of text) {
+    if (character === '\n' || (line && ctx.measureText(line + character).width > width)) {
+      lines.push(line);
+      if (lines.length === maxLines) {
+        const suffix = '…';
+        let last = lines[maxLines - 1];
+        while (last && ctx.measureText(last + suffix).width > width) last = Array.from(last).slice(0, -1).join('');
+        lines[maxLines - 1] = last + suffix;
+        return lines;
+      }
+      line = '';
+    }
+    if (character !== '\n') line += character;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function defaultAvatar() {
+  const ctx = avatar.getContext('2d');
+  ctx.fillStyle = '#191c21';
+  ctx.fillRect(0, 0, avatar.width, avatar.height);
+  ctx.strokeStyle = '#32f08c';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(56, 66, 16, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, avatar.width, 122);
+  ctx.clip();
+  ctx.beginPath();
+  ctx.roundRect(28, 94, 56, 56, 20);
+  ctx.stroke();
+  ctx.restore();
+  ctx.beginPath();
+  ctx.moveTo(28, 122);
+  ctx.lineTo(84, 122);
+  ctx.stroke();
+}
+
+function drawBadge() {
+  const ctx = badge.getContext('2d');
+  ctx.fillStyle = '#0a0b0d';
+  ctx.fillRect(0, 0, badge.width, badge.height);
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(16, 16, 112, 176, 10);
+  ctx.clip();
+  ctx.drawImage(avatar, 16, 16);
+  ctx.restore();
+
+  // 三段文字从图片顶边开始排列；长文本按可用高度截断。
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#f5f9fe';
+  const family = 'Inter, "PingFang SC", system-ui, sans-serif';
+  const name = nameInput.value.trim() || '你的名字';
+  ctx.font = '700 24px ' + family;
+  if (ctx.measureText(name).width > 82) ctx.font = '700 22px ' + family;
+  const nameFont = ctx.font;
+  const nameLines = wrap(ctx, name, 82, 2);
+  const subtitle = subtitleInput.value.trim();
+  ctx.font = '600 18px ' + family;
+  const subtitleLines = subtitle ? wrap(ctx, subtitle, 82, 2) : [];
+  const fixedHeight = nameLines.length * 28 + (subtitleLines.length ? 16 + subtitleLines.length * 22 : 0);
+  ctx.font = '14px ' + family;
+  const bioLines = wrap(ctx, bioInput.value.trim(), 82, Math.min(4, Math.floor((176 - fixedHeight - 14) / 18)));
+  let y = 16;
+  ctx.font = nameFont;
+  nameLines.forEach((line, i) => ctx.fillText(line, 142, y + i * 28 + ctx.measureText(line).actualBoundingBoxAscent));
+  y += nameLines.length * 28;
+  if (subtitleLines.length) {
+    y += 16;
+    ctx.font = '600 18px ' + family;
+    ctx.fillStyle = '#32f08c';
+    subtitleLines.forEach((line, i) => ctx.fillText(line, 142, y + i * 22 + ctx.measureText(line).actualBoundingBoxAscent));
+    y += subtitleLines.length * 22;
+  }
+  ctx.font = '14px ' + family;
+  ctx.fillStyle = '#a6aab5';
+  bioLines.forEach((line, i) => ctx.fillText(line, 142, y + 14 + i * 18 + ctx.measureText(line).actualBoundingBoxAscent));
+}
+
+function drawCover(source, canvas) {
+  const width = source.naturalWidth || source.width;
+  const height = source.naturalHeight || source.height;
+  const scale = Math.max(canvas.width / width, canvas.height / height);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.fillStyle = '#0a0b0d';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(source, (canvas.width - width * scale) / 2, (canvas.height - height * scale) / 2,
+                width * scale, height * scale);
+}
+
+// 裁剪始终保留当前会话的原图；拖动和缩放只改变取样区域，确认时才生成一次原生像素图。
+const cropDialog = byId('cropDialog'), cropPreview = byId('cropPreview'), cropZoom = byId('cropZoom');
+const cropSources = new Map();
+let cropState = null, cropResolve = null;
+const cropPointers = new Map();
+function cropRect(state) {
+  const scale = Math.max(state.width / state.image.naturalWidth, state.height / state.image.naturalHeight) * state.zoom;
+  const width = state.width / scale, height = state.height / scale;
+  state.cx = Math.max(width / 2, Math.min(state.image.naturalWidth - width / 2, state.cx));
+  state.cy = Math.max(height / 2, Math.min(state.image.naturalHeight - height / 2, state.cy));
+  return {x:state.cx - width / 2, y:state.cy - height / 2, width, height};
+}
+function drawCrop() {
+  if (!cropState) return;
+  const r = cropRect(cropState), ctx = cropPreview.getContext('2d');
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.fillStyle = '#0a0b0d'; ctx.fillRect(0, 0, cropPreview.width, cropPreview.height);
+  ctx.drawImage(cropState.image, r.x, r.y, r.width, r.height, 0, 0, cropPreview.width, cropPreview.height);
+  // 三分线仅用于编辑，不写入设备像素。
+  ctx.strokeStyle = '#ffffff55'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = 1; i <= 2; i++) {
+    ctx.moveTo(i * cropPreview.width / 3, 0); ctx.lineTo(i * cropPreview.width / 3, cropPreview.height);
+    ctx.moveTo(0, i * cropPreview.height / 3); ctx.lineTo(cropPreview.width, i * cropPreview.height / 3);
+  }
+  ctx.stroke(); cropZoom.value = String(cropState.zoom);
+}
+function finishCrop(apply) {
+  if (!cropState) return;
+  if (apply) {
+    const r = cropRect(cropState), ctx = cropState.canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.fillStyle = '#0a0b0d'; ctx.fillRect(0, 0, cropState.width, cropState.height);
+    ctx.drawImage(cropState.image, r.x, r.y, r.width, r.height, 0, 0, cropState.width, cropState.height);
+    cropSources.set(cropState.canvas, {...cropState});
+  }
+  cropState = null; cropPointers.clear(); cropDialog.close();
+  const resolve = cropResolve; cropResolve = null; resolve?.(apply);
+}
+async function crop(file, canvas) {
+  let previous = cropSources.get(canvas);
+  if (file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const image = new Image(); image.src = url; await image.decode();
+      previous = {image, canvas, width:canvas.width, height:canvas.height, zoom:1, cx:image.naturalWidth / 2, cy:image.naturalHeight / 2};
+    } finally { URL.revokeObjectURL(url); }
+  }
+  if (!previous) return false;
+  cropState = {...previous};
+  byId('cropTitle').textContent = canvas === avatar ? '裁剪头像' : '裁剪照片';
+  // 编辑预览使用 Retina 像素，最终输出保持设备原生尺寸，避免反复缩小与放大。
+  const displayWidth = Math.min(420 * canvas.width / canvas.height, window.innerHeight * .52 * canvas.width / canvas.height, window.innerWidth - 68);
+  const displayHeight = displayWidth * canvas.height / canvas.width;
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  cropPreview.width = Math.round(displayWidth * ratio); cropPreview.height = Math.round(displayHeight * ratio);
+  cropPreview.style.width = displayWidth + 'px';
+  const done = new Promise(resolve => { cropResolve = resolve; });
+  cropDialog.showModal(); drawCrop(); return done;
+}
+function cropPoint(event) { return {x:event.clientX, y:event.clientY}; }
+cropPreview.onpointerdown = event => {
+  cropPointers.set(event.pointerId, cropPoint(event)); cropPreview.setPointerCapture(event.pointerId);
+};
+cropPreview.onpointermove = event => {
+  if (!cropState || !cropPointers.has(event.pointerId)) return;
+  const previous = [...cropPointers.values()], old = cropPointers.get(event.pointerId);
+  cropPointers.set(event.pointerId, cropPoint(event));
+  const current = [...cropPointers.values()], rect = cropRect(cropState), box = cropPreview.getBoundingClientRect();
+  if (current.length === 1) {
+    cropState.cx -= (event.clientX - old.x) * rect.width / box.width;
+    cropState.cy -= (event.clientY - old.y) * rect.height / box.height;
+  } else if (current.length === 2) {
+    const distance = points => Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+    const before = distance(previous);
+    if (before > 0) cropState.zoom = Math.max(1, Math.min(4, cropState.zoom * distance(current) / before));
+  }
+  drawCrop();
+};
+for (const name of ['pointerup','pointercancel','lostpointercapture']) cropPreview.addEventListener(name, event => cropPointers.delete(event.pointerId));
+cropPreview.addEventListener('wheel', event => {
+  event.preventDefault();
+  if (cropState) { cropState.zoom = Math.max(1, Math.min(4, cropState.zoom * Math.exp(-event.deltaY * .002))); drawCrop(); }
+}, {passive:false});
+cropPreview.onkeydown = event => {
+  if (!cropState) return;
+  const delta = {ArrowLeft:[-1,0], ArrowRight:[1,0], ArrowUp:[0,-1], ArrowDown:[0,1]}[event.key];
+  if (delta) { event.preventDefault(); const r = cropRect(cropState); cropState.cx += delta[0] * r.width / 30; cropState.cy += delta[1] * r.height / 30; drawCrop(); }
+};
+cropZoom.oninput = () => { if (cropState) { cropState.zoom = Number(cropZoom.value); drawCrop(); } };
+byId('centerCrop').onclick = () => { if (cropState) { cropState.zoom = 1; cropState.cx = cropState.image.naturalWidth / 2; cropState.cy = cropState.image.naturalHeight / 2; drawCrop(); } };
+byId('cancelCrop').onclick = () => finishCrop(false);
+byId('applyCrop').onclick = () => finishCrop(true);
+cropDialog.oncancel = event => { event.preventDefault(); finishCrop(false); };
+
+function rgb565(canvas) {
+  const {width, height} = canvas;
+  const rgba = canvas.getContext('2d').getImageData(0, 0, width, height).data;
+  const output = new Uint8Array(width * height * 2);
+  for (let p = 0, i = 0; p < rgba.length; p += 4, i += 2) {
+    const word = (rgba[p] >> 3) << 11 | (rgba[p + 1] >> 2) << 5 | rgba[p + 2] >> 3;
+    output[i] = word & 255;
+    output[i + 1] = word >> 8;
+  }
+  return output;
+}
+
+function drawPixels(canvas, pixels) {
+  const ctx = canvas.getContext('2d');
+  const image = ctx.createImageData(canvas.width, canvas.height);
+  if (pixels.length !== canvas.width * canvas.height * 2) throw new Error('图片尺寸有误');
+  for (let p = 0, i = 0; p < pixels.length; p += 2, i += 4) {
+    const word = pixels[p] | pixels[p + 1] << 8;
+    image.data[i] = Math.round((word >> 11) * 255 / 31);
+    image.data[i + 1] = Math.round((word >> 5 & 63) * 255 / 63);
+    image.data[i + 2] = Math.round((word & 31) * 255 / 31);
+    image.data[i + 3] = 255;
+  }
+  ctx.putImageData(image, 0, 0);
+}
+
+function crc32(bytes) {
+  let crc = -1;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; ++bit) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+  }
+  return ((~crc) >>> 0).toString(16).padStart(8, '0');
+}
+
+async function sendImage(path, data, fields = {}) {
+  const headers = {'Content-Type':'application/octet-stream', 'X-Image-CRC32':crc32(data), ...fields};
+  const response = await request(path, {method:'POST', headers, body:data});
+  return response.text();
+}
+
+async function save(button, output, action, enable = true) {
+  button.disabled = true;
+  output.textContent = '正在保存…';
+  try { output.textContent = await action(); }
+  catch (error) { output.textContent = error.message || '连接中断，请重新扫码'; }
+  finally { button.disabled = !enable; }
+}
+
+for (const field of [nameInput, subtitleInput, bioInput]) field.addEventListener('input', drawBadge);
+async function editAvatar(file) {
+  badgeButton.disabled = true;
+  try { if (await crop(file, avatar)) { drawBadge(); byId('editAvatar').hidden = false; } }
+  catch { byId('badgeResult').textContent = '无法打开这张图片'; }
+  finally { badgeButton.disabled = false; }
+}
+function updatePhotoControls() {
+  for (const [i, slot] of Array.from(photoSlots.children).entries()) {
+    slot.textContent = (i + 1) + (photoMask & (1 << i) ? ' · 已保存' : ' · 空');
+    slot.setAttribute('aria-pressed', String(i === photoIndex));
+    slot.dataset.current = String(i === photoSelected && (photoMask & (1 << i)) !== 0);
+    slot.disabled = photoBusy;
+  }
+  photoInput.disabled = photoBusy;
+  photoButton.disabled = photoBusy || !photoDraft;
+  photoDelete.hidden = !(photoMask & (1 << photoIndex));
+  photoDelete.disabled = photoBusy;
+  const edit = byId('editPhoto');
+  edit.hidden = !cropSources.has(photo);
+  edit.disabled = photoBusy;
+}
+
+async function photoAction(action, message = '') {
+  if (photoBusy) return;
+  photoBusy = true;
+  updatePhotoControls();
+  photoResult.textContent = message;
+  try { photoResult.textContent = (await action()) || ''; }
+  catch (error) { photoResult.textContent = error.message || '连接中断，请重新扫码'; }
+  finally { photoBusy = false; updatePhotoControls(); }
+}
+
+function photoHeaders(index = photoIndex) {
+  return {'X-Photo-Index':String(index)};
+}
+
+async function showPhoto(index, mask) {
+  if (mask & (1 << index)) {
+    const response = await request('/photo', {headers: photoHeaders(index)});
+    drawPixels(photo, new Uint8Array(await response.arrayBuffer()));
+  } else {
+    photo.getContext('2d').clearRect(0, 0, photo.width, photo.height);
+  }
+  cropSources.delete(photo);
+  photoDraft = false;
+  photoIndex = index;
+}
+
+function editPhoto(file) {
+  return photoAction(async () => {
+    try { if (await crop(file, photo)) photoDraft = true; }
+    catch { throw new Error('无法打开这张图片'); }
+  });
+}
+
+avatarInput.addEventListener('change', event => { const file = event.target.files[0]; if (file) editAvatar(file); event.target.value = ''; });
+photoInput.addEventListener('change', () => {
+  const file = photoInput.files[0];
+  photoInput.value = '';
+  if (file) editPhoto(file);
+});
+byId('editAvatar').onclick = () => editAvatar();
+byId('editPhoto').onclick = () => editPhoto();
+
+badgeButton.onclick = () => save(badgeButton, byId('badgeResult'), () => {
+  if (encoder.encode(nameInput.value).length > 96 || encoder.encode(subtitleInput.value).length > 120 ||
+      encoder.encode(bioInput.value).length > 240)
+    throw new Error('文字太长，请缩短后保存');
+  const rendered = rgb565(badge), picture = rgb565(avatar);
+  const body = new Uint8Array(rendered.length + picture.length);
+  body.set(rendered);
+  body.set(picture, rendered.length);
+  return sendImage('/badge', body, {
+    'X-Badge-Name':'.' + encodeURIComponent(nameInput.value),
+    'X-Badge-Subtitle':'.' + encodeURIComponent(subtitleInput.value),
+    'X-Badge-Bio':'.' + encodeURIComponent(bioInput.value)
+  });
+});
+
+photoButton.onclick = () => photoAction(async () => {
+  const message = await sendImage('/photo', rgb565(photo), photoHeaders());
+  if (!photoMask) photoSelected = photoIndex;
+  photoMask |= 1 << photoIndex;
+  photoDraft = false;
+  return message;
+}, '正在保存…');
+
+photoDelete.onclick = () => {
+  if (!window.confirm('删除第 ' + (photoIndex + 1) + ' 张照片？')) return;
+  return photoAction(async () => {
+    const response = await request('/photo', {method:'DELETE', headers:photoHeaders()});
+    photoMask &= ~(1 << photoIndex);
+    if (photoSelected === photoIndex) {
+      for (let step = 1; step <= photoSlots.children.length; ++step) {
+        const next = (photoIndex + step) % photoSlots.children.length;
+        if (photoMask & (1 << next)) { photoSelected = next; break; }
+      }
+    }
+    await showPhoto(photoIndex, photoMask);
+    return response.text();
+  }, '正在删除…');
+};
+// 网络轮询只更新结果，不覆盖身份、照片和声音的未保存草稿。
+let networkTimer, networkBusy = false, networkFailures = 0;
+const networkPicker = byId('networks');
+function selectedNetwork() {
+  return networkPicker.value === '__manual' ? byId('ssid').value : networkPicker.value;
+}
+function updateWifiControls() {
+  const manual = networkPicker.value === '__manual';
+  byId('manualNetwork').hidden = !manual;
+  const secure = manual || networkPicker.selectedOptions[0]?.dataset.secure !== 'false';
+  byId('wifiPassword').hidden = !secure;
+  byId('saveWifi').disabled = networkBusy || !selectedNetwork();
+  byId('scanWifi').disabled = networkBusy;
+  networkPicker.disabled = networkBusy;
+}
+networkPicker.onchange = updateWifiControls;
+byId('ssid').oninput = updateWifiControls;
+async function readNetwork() {
+  clearTimeout(networkTimer);
+  const data = await (await request('/network')).json();
+  networkFailures = 0;
+  networkBusy = data.connecting || data.scanning;
+  byId('wifi').hidden = !data.hotspot;
+  byId('connectionBanner').textContent = data.hotspot ? '热点直连 · 可直接编辑' : '局域网连接 · 可直接编辑';
+  byId('networkState').dataset.connected = String(data.connected);
+  byId('wifiResult').dataset.error = String(!!data.error);
+  byId('networkState').textContent = data.connected ? '已连接 ' + data.ssid : data.wifiEnabled === false ? '临时热点 · 日常 Wi-Fi 已关闭' : '路由器未连接';
+  byId('wifiResult').textContent = data.connecting ? '正在连接…' : data.scanning ? '正在扫描…' : data.message;
+  byId('scanWifi').textContent = data.scanning ? '扫描中' : '刷新';
+  const previous = networkPicker.value;
+  const entries = data.networks.map(item => ({ssid:item.ssid,secure:item.secure}));
+  const signature = JSON.stringify(entries);
+  if (signature !== networkPicker.dataset.signature) {
+    networkPicker.dataset.signature = signature;
+    networkPicker.replaceChildren(new Option('选择网络', ''));
+    for (const item of entries) {
+      const option = new Option(item.ssid + (item.secure ? '  ·  加密' : ''), item.ssid);
+      option.dataset.secure = String(item.secure);
+      networkPicker.add(option);
+    }
+    networkPicker.add(new Option('手动输入名称', '__manual'));
+    if ([...networkPicker.options].some(item => item.value === previous)) networkPicker.value = previous;
+  }
+  updateWifiControls();
+  if (networkBusy) networkTimer = setTimeout(() => readNetwork().catch(networkError), 1500);
+}
+function networkError(error) {
+  // AP 与路由器共享无线信道，切换期间可能短暂断开；恢复后继续读结果。
+  if (networkBusy && error.status !== 403 && ++networkFailures <= 12) {
+    byId('wifiResult').dataset.error = 'false';
+    byId('wifiResult').textContent = '正在恢复连接…';
+    clearTimeout(networkTimer);
+    networkTimer = setTimeout(() => readNetwork().catch(networkError), 2000);
+    return;
+  }
+  networkBusy = false;
+  byId('scanWifi').textContent = '刷新';
+  byId('wifiResult').dataset.error = 'true';
+  byId('wifiResult').textContent = error.message;
+  updateWifiControls();
+}
+async function scanNetworks() {
+  networkBusy = true;
+  updateWifiControls();
+  try {
+    await request('/network', {method:'POST'});
+    await readNetwork();
+  } catch (error) { networkError(error); }
+}
+byId('wifi').ontoggle = () => { if (byId('wifi').open && !networkBusy) scanNetworks(); };
+byId('scanWifi').onclick = scanNetworks;
+byId('saveWifi').onclick = async () => {
+  networkBusy = true;
+  updateWifiControls();
+  byId('wifiResult').dataset.error = 'false';
+  byId('wifiResult').textContent = '正在连接…';
+  try {
+    await request('/wifi', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ssid:selectedNetwork(),password:byId('wifiPassword').hidden?'':byId('password').value})
+    });
+    byId('password').value = '';
+    await readNetwork();
+  } catch (error) { networkError(error); }
+};
+
+const musicSelection = byId('musicSelection');
+const musicScore = byId('musicScore');
+musicSelection.onchange = () => { byId('customMusic').hidden = musicSelection.value !== '3'; };
+byId('musicFile').onchange = async event => {
+  const file = event.target.files[0];
+  if (!file) return;
+  try {
+    if (file.size > 1024) throw new Error('乐谱文件最多 1 KB');
+    musicScore.value = (await file.text()).trim();
+    byId('musicResult').textContent = '';
+  } catch (error) { byId('musicResult').textContent = error.message; }
+};
+
+async function sendMusic(path) {
+  const custom = musicScore.value.trim();
+  if (encoder.encode(custom).length > 1024) throw new Error('乐谱最多 1 KB');
+  const response = await request(path, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({enabled:byId('musicEnabled').checked, selection:Number(musicSelection.value), custom})
+  });
+  return response.text();
+}
+byId('saveMusic').onclick = () => save(byId('saveMusic'), byId('musicResult'), () => sendMusic('/music'));
+byId('previewMusic').onclick = () => save(byId('previewMusic'), byId('musicResult'), () => sendMusic('/music/preview'));
+byId('stopMusic').onclick = () => save(byId('stopMusic'), byId('musicResult'), async () =>
+  (await request('/music/stop', {method:'POST'})).text());
+
+async function initializeMusic() {
+  const data = await (await request('/music')).json();
+  musicSelection.replaceChildren();
+  data.presets.forEach((name, index) => musicSelection.add(new Option(name, String(index))));
+  musicSelection.add(new Option('自定义', '3'));
+  musicSelection.value = String(data.selection);
+  musicScore.value = data.custom;
+  byId('musicEnabled').checked = data.enabled;
+  musicSelection.onchange();
+  for (const id of ['musicEnabled', 'musicSelection', 'musicScore', 'musicFile', 'previewMusic', 'stopMusic', 'saveMusic'])
+    byId(id).disabled = false;
+}
+
+function updateDevicePreview() {
+  byId('brightnessValue').textContent = byId('brightness').value + '%';
+  byId('volumeValue').textContent = byId('volume').value === '0' ? '静音' : byId('volume').value + '%';
+  const portable = byId('powerMode').value === '1';
+  byId('deepSleepSetting').hidden = !portable;
+  byId('powerHint').textContent = portable ? '休眠后暂停无线同步，按任意键唤醒。' : '息屏后继续同步 Codex。';
+}
+for (const id of ['brightness', 'volume', 'powerMode', 'sleepSeconds', 'deepSleepSeconds']) byId(id).addEventListener('input', updateDevicePreview);
+byId('saveDevice').onclick = () => save(byId('saveDevice'), byId('deviceResult'), async () => {
+  const body = Object.fromEntries(['brightness', 'volume', 'sleepSeconds', 'powerMode', 'deepSleepSeconds'].map(id => [id, Number(byId(id).value)]));
+  return (await request('/device', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})).text();
+});
+async function initializeDevice() {
+  const data = await (await request('/device')).json();
+  await readNetwork();
+  if (data.storage) {
+    const s = data.storage, used = s.firmware + s.badge + s.photo;
+    const mib = bytes => (bytes / 1048576).toFixed(2) + ' MiB';
+    byId('storageTotal').textContent = `${mib(s.total)} 闪存`;
+    byId('storageBar').value = used / s.total;
+    byId('storageDetail').textContent = `运行固件 ${mib(s.firmware)} · 个人内容 ${mib(s.badge + s.photo)} · 系统与预留 ${mib(s.total - used)}。图片区 ${mib(s.assetsCapacity)}。`;
+  } else byId('storageTotal').textContent = '暂不可用';
+  for (const id of ['brightness', 'volume', 'sleepSeconds', 'powerMode', 'deepSleepSeconds']) {
+    byId(id).value = String(data[id]);
+    byId(id).disabled = false;
+  }
+  updateDevicePreview();
+  byId('saveDevice').disabled = false;
+}
+
+let profileRequest;
+function readProfile() {
+  if (!profileRequest) profileRequest = request('/profile').then(response => response.json()).catch(error => {
+    profileRequest = null; throw error;
+  });
+  return profileRequest;
+}
+async function initializeIdentity() {
+  const data = await readProfile();
+  byId('connectionBanner').textContent = data.hotspot ? '热点直连 · 可直接编辑' : '局域网连接 · 可直接编辑';
+  if (!data.avatar) defaultAvatar();
+  if (data.avatar) {
+    // 原版本保存的 80×80 头像也按比例裁切，避免拉伸人物。
+    const saved = document.createElement('canvas');
+    saved.width = data.avatarWidth || 80;
+    saved.height = data.avatarHeight || 80;
+    drawPixels(saved, new Uint8Array(await (await request('/avatar')).arrayBuffer()));
+    drawCover(saved, avatar);
+  }
+  cropSources.delete(avatar);
+  byId('editAvatar').hidden = true;
+  nameInput.value = data.name;
+  subtitleInput.value = data.subtitle || '';
+  bioInput.value = data.bio;
+  drawBadge();
+  for (const field of [nameInput, subtitleInput, bioInput, avatarInput]) field.disabled = false;
+  badgeButton.disabled = false;
+}
+async function initializePhotos() {
+  const {photoCapacity:capacity, photoMask:mask, photoSelected:selected} = await readProfile();
+  if (!Number.isInteger(capacity) || capacity < 1 || capacity > 8 ||
+      !Number.isInteger(mask) || mask < 0 || mask >= (1 << capacity) ||
+      !Number.isInteger(selected) || selected < 0 || selected >= capacity)
+    throw new Error('无法读取相册，请重新扫码');
+  await showPhoto(selected, mask);
+  photoMask = mask;
+  photoSelected = selected;
+  photoSlots.replaceChildren();
+  for (let i = 0; i < capacity; ++i) {
+    const button = document.createElement('button');
+    button.onclick = () => {
+      if (i === photoIndex) return;
+      if (photoDraft && !window.confirm('放弃当前未保存的裁剪？')) return;
+      return photoAction(() => showPhoto(i, photoMask), '正在读取…');
+    };
+    photoSlots.append(button);
+  }
+  updatePhotoControls();
+}
+
+const backupDialog = byId('backupDialog'), backupOutput = byId('backupResult');
+const backupFile = byId('backupFile'), restoreButton = byId('restoreBackup');
+const backupControls = ['closeBackup', 'exportBackup', 'chooseBackup', 'restoreBackup'];
+const deviceKeys = ['brightness', 'volume', 'sleepSeconds', 'powerMode', 'deepSleepSeconds'];
+let pendingBackup = null, backupBusy = false;
+
+function encodeImage(data) {
+  let binary = '';
+  for (let start = 0; start < data.length; start += 8192)
+    binary += String.fromCharCode(...data.subarray(start, start + 8192));
+  return {data:btoa(binary), crc32:crc32(data)};
+}
+
+function decodeImage(image, sizes) {
+  if (typeof image?.data !== 'string' || typeof image.crc32 !== 'string') throw new Error('图片格式有误');
+  const data = Uint8Array.from(atob(image.data), c => c.charCodeAt(0));
+  if (!sizes.includes(data.length) || crc32(data) !== image.crc32) throw new Error('图片尺寸或校验值有误');
+  return data;
+}
+
+function validateBackup(value) {
+  if (value?.format !== 'folotoy-passport' || value.version !== 1)
+    throw new Error('暂不支持这种备份格式');
+  const {identity, photos, selectedPhoto, music, device} = value;
+  if (!Array.isArray(photos) || photos.length !== 3 ||
+      !Number.isInteger(selectedPhoto) || selectedPhoto < 0 || selectedPhoto >= photos.length ||
+      (photos.some(Boolean) && !photos[selectedPhoto]))
+    throw new Error('备份的相册目录有误');
+  if (identity !== null) {
+    for (const [field, limit] of [['name',96], ['subtitle',120], ['bio',240]]) {
+      const text = identity?.[field];
+      if (typeof text !== 'string' || /[\u0000-\u0009\u000b-\u001f\u007f]/.test(text) ||
+          encoder.encode(text).length > limit)
+        throw new Error('备份的身份卡文字有误');
+      encodeURIComponent(text); // 确认文字可原样写回固件的 UTF-8 请求头。
+    }
+  }
+  if (typeof music?.enabled !== 'boolean' || ![0,1,2,3].includes(music.selection) ||
+      typeof music.custom !== 'string' || music.custom.includes('\0') || encoder.encode(music.custom).length > 1024)
+    throw new Error('备份的音乐设置有误');
+  if (!Number.isInteger(device?.brightness) || device.brightness < 10 || device.brightness > 100 ||
+      !Number.isInteger(device?.volume) || device.volume < 0 || device.volume > 100 ||
+      ![0,30,60,180,300].includes(device?.sleepSeconds) || ![0,1].includes(device?.powerMode) ||
+      ![300,900,1800].includes(device?.deepSleepSeconds))
+    throw new Error('备份的显示设置有误');
+  return {
+    identity:identity === null ? null : {...identity, image:decodeImage(identity.image, [147200, 173824])},
+    photos:photos.map(item => item === null ? null : decodeImage(item, [153600])),
+    selectedPhoto,
+    music:{enabled:music.enabled, selection:music.selection, custom:music.custom},
+    device:Object.fromEntries(deviceKeys.map(key => [key, device[key]]))
+  };
+}
+
+async function backupAction(action) {
+  if (backupBusy) return;
+  backupBusy = true;
+  for (const id of backupControls) byId(id).disabled = true;
+  try { await action(); }
+  catch (error) { backupOutput.textContent = error.message || '操作失败，请重试'; }
+  finally {
+    backupBusy = false;
+    for (const id of backupControls) byId(id).disabled = false;
+  }
+}
+
+async function readBackupAsset(path, options) {
+  return encodeImage(new Uint8Array(await (await request(path, options)).arrayBuffer()));
+}
+
+byId('openBackup').onclick = () => {
+  if (backupDialog.open) return;
+  pendingBackup = null;
+  backupOutput.textContent = '';
+  restoreButton.hidden = true;
+  backupDialog.showModal();
+};
+byId('closeBackup').onclick = () => backupDialog.close();
+backupDialog.oncancel = event => { if (backupBusy) event.preventDefault(); };
+
+byId('exportBackup').onclick = () => backupAction(async () => {
+  backupOutput.textContent = '正在读取卡片…';
+  const profile = await (await request('/profile')).json();
+  const music = await (await request('/music')).json();
+  const device = await (await request('/device')).json();
+  const identity = profile.avatar ? {
+    name:profile.name, subtitle:profile.subtitle, bio:profile.bio,
+    image:await readBackupAsset('/badge')
+  } : null;
+  const photos = [null, null, null];
+  for (let i = 0; i < photos.length; ++i)
+    if (profile.photoMask & (1 << i)) photos[i] = await readBackupAsset('/photo', {headers:photoHeaders(i)});
+  const value = {
+    format:'folotoy-passport', version:1, exportedAt:new Date().toISOString(),
+    identity, photos, selectedPhoto:profile.photoSelected,
+    music:{enabled:music.enabled, selection:music.selection, custom:music.custom},
+    device:Object.fromEntries(deviceKeys.map(key => [key, device[key]]))
+  };
+  validateBackup(value);
+  const text = JSON.stringify(value);
+  const filename = 'Passport-' + value.exportedAt.slice(0,10) + '.json';
+  if (window.webkit?.messageHandlers?.passportBackup) {
+    window.webkit.messageHandlers.passportBackup.postMessage({filename, text});
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([text], {type:'application/json'}));
+  const download = document.createElement('a');
+  download.href = url;
+  download.download = filename;
+  document.body.append(download);
+  download.click();
+  download.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  backupOutput.textContent = '备份文件已生成';
+});
+
+byId('chooseBackup').onclick = () => backupFile.click();
+backupFile.onchange = () => {
+  const file = backupFile.files[0];
+  backupFile.value = '';
+  if (!file) return;
+  pendingBackup = null;
+  restoreButton.hidden = true;
+  return backupAction(async () => {
+    if (file.size > 900000) throw new Error('备份文件超过大小限制');
+    pendingBackup = validateBackup(JSON.parse(await file.text()));
+    restoreButton.hidden = false;
+    backupOutput.textContent = file.name + ' · 恢复会覆盖卡片现有资料';
+  });
+};
+
+function backupJSON(value) {
+  return {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(value)};
+}
+
+restoreButton.onclick = () => backupAction(async () => {
+  const {identity, photos, selectedPhoto, music, device} = pendingBackup;
+  backupOutput.textContent = '正在校验乐谱…';
+  await request('/music/check', backupJSON(music));
+  async function restoreItem(name, action) {
+    backupOutput.textContent = '正在恢复' + name + '…';
+    try { await action(); }
+    catch (error) { throw new Error(name + '恢复中断。之前已保存的项目保留。' + error.message); }
+  }
+  try {
+    if (identity) await restoreItem('身份卡', () => sendImage('/badge', identity.image, {
+      'X-Badge-Name':'.' + encodeURIComponent(identity.name),
+      'X-Badge-Subtitle':'.' + encodeURIComponent(identity.subtitle),
+      'X-Badge-Bio':'.' + encodeURIComponent(identity.bio)
+    }));
+    for (const [i, image] of photos.entries())
+      if (image) await restoreItem('照片 ' + (i + 1), () => sendImage('/photo', image, photoHeaders(i)));
+    await restoreItem('音乐', () => request('/music', backupJSON(music)));
+    await restoreItem('显示设置', () => request('/device', backupJSON(device)));
+    if (!identity) await restoreItem('空白身份卡', () => request('/badge', {method:'DELETE'}));
+    for (const [i, image] of photos.entries())
+      if (!image) await restoreItem('空白照片位 ' + (i + 1), () => request('/photo', {method:'DELETE', headers:photoHeaders(i)}));
+    if (photos[selectedPhoto])
+      await restoreItem('展示照片', () => request('/photo/select', {method:'POST', headers:photoHeaders(selectedPhoto)}));
+    pendingBackup = null;
+    restoreButton.hidden = true;
+    backupOutput.textContent = '已恢复到卡片';
+  } finally {
+    profileRequest = null;
+    panelLoads.clear();
+    loadPanel('device');
+  }
+});
+
+
+const panelLoads = new Map();
+const panelConfig = {
+  identity:['badge', initializeIdentity], photos:['photo', initializePhotos],
+  music:['music', initializeMusic], device:['device', initializeDevice]
+};
+function loadPanel(panel) {
+  if (panelLoads.has(panel)) return panelLoads.get(panel);
+  const [prefix, initialize] = panelConfig[panel];
+  const output = byId(prefix + 'Result'), retry = byId(prefix + 'Retry');
+  output.textContent = '正在读取…'; retry.hidden = true;
+  const pending = initialize().then(() => { output.textContent = ''; }).catch(error => {
+    console.error('Failed to load settings panel:', panel, error);
+    output.textContent = error.message;
+    retry.hidden = error.status === 403;
+    panelLoads.delete(panel);
+  });
+  panelLoads.set(panel, pending);
+  return pending;
+}
+for (const [panel, [prefix]] of Object.entries(panelConfig)) byId(prefix + 'Retry').onclick = () => loadPanel(panel);
+defaultAvatar();
+drawBadge();
+loadPanel('identity').then(() => {
+  const now = new Date();
+  request('/time', {method:'POST', headers:{
+    'X-Clock-Epoch':String(Math.floor(now.getTime() / 1000)),
+    'X-Clock-Offset':String(-now.getTimezoneOffset())
+  }}).catch(error => console.warn('Clock sync:', error.message));
+});
+</script>
+</html>

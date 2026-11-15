@@ -1,0 +1,5 @@
+#pragma once
+
+// 发布时一并更新版本和更新时刻（北京时间），诊断仍使用 ESP-IDF 记录的 Git 构建标识。
+#define PASSPORT_RELEASE_VERSION "1.1.5"
+#define PASSPORT_RELEASE_UPDATED_AT "2026-11-15 21:40"

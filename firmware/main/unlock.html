@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Passport · 网页设置</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif;color:#f5f9fe;background:#0a0b0d}
+*{box-sizing:border-box}body{min-height:100svh;margin:0;display:grid;place-items:center;padding:24px}
+main{width:100%;max-width:360px}svg{width:44px;height:44px;stroke:#32f08c;fill:none;stroke-width:1.5}
+h1{font-size:28px;letter-spacing:-1px;margin:20px 0 32px}label{display:block;color:#a6aab5;font-size:14px}
+input{display:block;width:100%;margin:12px 0 24px;border:1px solid #454b56;border-radius:14px;padding:16px;background:#191c21;color:#f5f9fe;text-align:center;font:32px ui-monospace,monospace;letter-spacing:12px;outline:none}
+input:focus{border-color:#32f08c}button{width:100%;padding:16px;border:0;border-radius:14px;background:#32f08c;color:#0a0b0d;font:600 16px system-ui;cursor:pointer}button:disabled{opacity:.5}output{display:block;margin-top:16px;font-size:14px;color:#ffb778}
+</style><main>
+<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="2" width="22" height="28" rx="6"/><circle cx="12" cy="13" r="1.5"/><circle cx="20" cy="13" r="1.5"/><path d="M12 21h8"/></svg>
+<h1>网页设置</h1>
+<form action="/unlock" method="post"><label for="code">输入卡片屏幕上的访问码</label><input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus aria-label="六位访问码"><button>打开设置 →</button><output aria-live="polite"></output></form>
+</main><script>
+const form=document.querySelector('form'),code=document.querySelector('input'),button=document.querySelector('button'),result=document.querySelector('output');
+form.onsubmit=async event=>{event.preventDefault();if(button.disabled||!form.reportValidity())return;button.disabled=true;result.textContent='';try{const response=await fetch('/unlock',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({code:code.value})});if(!response.ok)throw new Error(await response.text());location.assign(response.url)}catch(error){result.textContent=error.message;button.disabled=false;code.select()}};
+code.oninput=()=>{code.value=code.value.replace(/\D/g,'').slice(0,6);if(code.value.length===6)form.requestSubmit()};
+</script></html>

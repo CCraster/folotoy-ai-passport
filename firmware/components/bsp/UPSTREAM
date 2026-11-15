@@ -1,0 +1,4 @@
+https://github.com/FoloToy/ai-passport
+b97765a470572bc6a7c745ce97203febde830610
+Source: components/bsp
+Local change: expose probe and wake paths that preserve the installed fuel-gauge profile and restore the board profile when the gauge loses its update flag after reset.
