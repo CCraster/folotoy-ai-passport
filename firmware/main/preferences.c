@@ -17,7 +17,7 @@ bool preferences_merge(passport_preferences_t *out, const passport_preferences_t
                        out->sleep_seconds == 180 || out->sleep_seconds == 300;
     bool deep_valid = out->deep_sleep_seconds == 300 || out->deep_sleep_seconds == 900 || out->deep_sleep_seconds == 1800;
     return deep_valid && out->scene < PIXEL_SCENE_COUNT &&
-           out->page <= CITY && out->return_page <= CITY && out->return_page != SETTINGS &&
+           out->page <= GAME && out->return_page <= GAME && out->return_page != SETTINGS &&
            out->brightness >= 10 && out->brightness <= 100 &&
            out->volume <= 100 && out->power_mode <= POWER_PORTABLE && sleep_valid;
 }

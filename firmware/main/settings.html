@@ -120,7 +120,7 @@ output:not(:empty) { display: block; margin-top: 12px; color: #32f08c; font-size
 <div class="editor">
 <div class="preview"><canvas id="photoPreview" width="240" height="320" aria-label="全屏照片预览"></canvas></div>
 <div class="fields">
-<label>照片<input id="photo" type="file" accept="image/*" disabled></label>
+<label><span id="photoFileLabel">选择照片</span><input id="photo" type="file" accept="image/*" disabled></label>
 <button id="editPhoto" class="edit-crop" hidden>调整裁剪</button>
 <div class="actions"><button id="savePhoto" disabled>保存照片</button>
 <button id="deletePhoto" class="secondary" hidden>删除</button></div>
@@ -485,6 +485,30 @@ function drawPixels(canvas, pixels) {
   ctx.putImageData(image, 0, 0);
 }
 
+async function encodePhoto(canvas) {
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.90));
+  if (!blob || blob.type !== 'image/jpeg') throw new Error('无法生成 JPEG，请换一张图片');
+  const data = new Uint8Array(await blob.arrayBuffer());
+  if (data.length > 80 * 1024) throw new Error('照片超过 80 KiB，请调整裁剪或换图');
+  return data;
+}
+
+async function drawPhoto(data) {
+  if (data.length === 153600) {
+    drawPixels(photo, data);
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([data], {type:'image/jpeg'}));
+  try {
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    if (image.naturalWidth !== photo.width || image.naturalHeight !== photo.height)
+      throw new Error('照片尺寸有误');
+    photo.getContext('2d').drawImage(image, 0, 0);
+  } finally { URL.revokeObjectURL(url); }
+}
+
 function crc32(bytes) {
   let crc = -1;
   for (const byte of bytes) {
@@ -524,7 +548,10 @@ function updatePhotoControls() {
   }
   photoInput.disabled = photoBusy;
   photoButton.disabled = photoBusy || !photoDraft;
-  photoDelete.hidden = !(photoMask & (1 << photoIndex));
+  const filled = Boolean(photoMask & (1 << photoIndex));
+  byId('photoFileLabel').textContent = filled ? '选择替换图片' : '选择新照片';
+  photoButton.textContent = filled ? '保存替换' : '保存照片';
+  photoDelete.hidden = !filled;
   photoDelete.disabled = photoBusy;
   const edit = byId('editPhoto');
   edit.hidden = !cropSources.has(photo);
@@ -548,7 +575,7 @@ function photoHeaders(index = photoIndex) {
 async function showPhoto(index, mask) {
   if (mask & (1 << index)) {
     const response = await request('/photo', {headers: photoHeaders(index)});
-    drawPixels(photo, new Uint8Array(await response.arrayBuffer()));
+    await drawPhoto(new Uint8Array(await response.arrayBuffer()));
   } else {
     photo.getContext('2d').clearRect(0, 0, photo.width, photo.height);
   }
@@ -589,7 +616,7 @@ badgeButton.onclick = () => save(badgeButton, byId('badgeResult'), () => {
 });
 
 photoButton.onclick = () => photoAction(async () => {
-  const message = await sendImage('/photo', rgb565(photo), photoHeaders());
+  const message = await sendImage('/photo', await encodePhoto(photo), photoHeaders());
   if (!photoMask) photoSelected = photoIndex;
   photoMask |= 1 << photoIndex;
   photoDraft = false;
@@ -830,18 +857,21 @@ function encodeImage(data) {
   return {data:btoa(binary), crc32:crc32(data)};
 }
 
-function decodeImage(image, sizes) {
+function decodeImage(image, sizes, jpegLimit = 0) {
   if (typeof image?.data !== 'string' || typeof image.crc32 !== 'string') throw new Error('图片格式有误');
   const data = Uint8Array.from(atob(image.data), c => c.charCodeAt(0));
-  if (!sizes.includes(data.length) || crc32(data) !== image.crc32) throw new Error('图片尺寸或校验值有误');
+  const jpeg = data.length >= 24 && data.length <= jpegLimit && data[0] === 255 && data[1] === 216 &&
+    data[data.length - 2] === 255 && data[data.length - 1] === 217;
+  if ((!sizes.includes(data.length) && !jpeg) || crc32(data) !== image.crc32)
+    throw new Error('图片尺寸或校验值有误');
   return data;
 }
 
 function validateBackup(value) {
-  if (value?.format !== 'folotoy-passport' || value.version !== 1)
+  if (value?.format !== 'folotoy-passport' || ![1,2].includes(value.version))
     throw new Error('暂不支持这种备份格式');
   const {identity, photos, selectedPhoto, music, device} = value;
-  if (!Array.isArray(photos) || photos.length !== 3 ||
+  if (!Array.isArray(photos) || photos.length !== (value.version === 1 ? 3 : 6) ||
       !Number.isInteger(selectedPhoto) || selectedPhoto < 0 || selectedPhoto >= photos.length ||
       (photos.some(Boolean) && !photos[selectedPhoto]))
     throw new Error('备份的相册目录有误');
@@ -864,7 +894,8 @@ function validateBackup(value) {
     throw new Error('备份的显示设置有误');
   return {
     identity:identity === null ? null : {...identity, image:decodeImage(identity.image, [147200, 173824])},
-    photos:photos.map(item => item === null ? null : decodeImage(item, [153600])),
+    photos:Array.from({length:6}, (_, i) => photos[i] == null ? null :
+      decodeImage(photos[i], [153600], value.version === 2 ? 80 * 1024 : 0)),
     selectedPhoto,
     music:{enabled:music.enabled, selection:music.selection, custom:music.custom},
     device:Object.fromEntries(deviceKeys.map(key => [key, device[key]]))
@@ -906,11 +937,11 @@ byId('exportBackup').onclick = () => backupAction(async () => {
     name:profile.name, subtitle:profile.subtitle, bio:profile.bio,
     image:await readBackupAsset('/badge')
   } : null;
-  const photos = [null, null, null];
+  const photos = Array(profile.photoCapacity).fill(null);
   for (let i = 0; i < photos.length; ++i)
     if (profile.photoMask & (1 << i)) photos[i] = await readBackupAsset('/photo', {headers:photoHeaders(i)});
   const value = {
-    format:'folotoy-passport', version:1, exportedAt:new Date().toISOString(),
+    format:'folotoy-passport', version:2, exportedAt:new Date().toISOString(),
     identity, photos, selectedPhoto:profile.photoSelected,
     music:{enabled:music.enabled, selection:music.selection, custom:music.custom},
     device:Object.fromEntries(deviceKeys.map(key => [key, device[key]]))
@@ -941,8 +972,17 @@ backupFile.onchange = () => {
   pendingBackup = null;
   restoreButton.hidden = true;
   return backupAction(async () => {
-    if (file.size > 900000) throw new Error('备份文件超过大小限制');
-    pendingBackup = validateBackup(JSON.parse(await file.text()));
+    if (file.size > 1200000) throw new Error('备份文件超过大小限制');
+    const backup = validateBackup(JSON.parse(await file.text()));
+    const canvas = document.createElement('canvas');
+    canvas.width = photo.width;
+    canvas.height = photo.height;
+    for (let i = 0; i < backup.photos.length; ++i) {
+      if (backup.photos[i]?.length !== 153600) continue;
+      drawPixels(canvas, backup.photos[i]);
+      backup.photos[i] = await encodePhoto(canvas);
+    }
+    pendingBackup = backup;
     restoreButton.hidden = false;
     backupOutput.textContent = file.name + ' · 恢复会覆盖卡片现有资料';
   });

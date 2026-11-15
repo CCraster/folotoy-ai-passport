@@ -4,9 +4,11 @@
 #include <limits.h>
 #include <string.h>
 #include "music.h"
+#include "meow_view.h"
 #include "network.h"
 #include "power.h"
 #include "pixel_city.h"
+#include "photo_jpeg.h"
 #include "bsp_battery.h"
 #include "bsp_button.h"
 #include "bsp_display.h"
@@ -27,8 +29,9 @@ LV_FONT_DECLARE(passport_font)
 LV_FONT_DECLARE(passport_heading)
 LV_FONT_DECLARE(passport_caption)
 LV_FONT_DECLARE(passport_quota)
+LV_FONT_DECLARE(passport_game)
 
-static const uint8_t display_pages[] = {BADGE, PHOTO, QUOTA, CITY};
+static const uint8_t display_pages[] = {BADGE, PHOTO, QUOTA, CITY, GAME};
 enum { WEB_SETUP, PAIR, BRIGHTNESS, VOLUME, BOOT_MUSIC, SLEEP, POWER_MODE, FORGET_MAC, RESET, WIFI_POWER, BLE_POWER, MUSIC_ENABLED_SETTING, MUSIC_SELECTION_SETTING, DEEP_SLEEP_SETTING, ABOUT, TASK_CHIME, TASK_CHIME_ENABLE, TASK_CHIME_VOLUME };
 enum { MUSIC_ENABLE, MUSIC_MELODY, MUSIC_PREVIEW, MUSIC_MENU_COUNT };
 enum { CHIME_ENABLE, CHIME_FOLLOW, CHIME_LEVEL, CHIME_PREVIEW, CHIME_MENU_COUNT };
@@ -55,6 +58,7 @@ static struct {
 static lv_obj_t *image_view;
 static lv_image_dsc_t image, identity_text;
 static bool image_detached;
+static uint8_t displayed_badge, displayed_photo;
 // selection 只在可操作项之间循环；返回统一由长按确认键触发。
 static uint8_t settings_group, selection;
 static int settings_scroll_y;
@@ -85,7 +89,15 @@ static int64_t config_deadline;
 static int64_t last_input;
 static bool dark;
 static int battery = -1;
-static bool dirty = true;
+static bool dirty;
+enum { GAME_COVER, GAME_PLAY, GAME_PAUSED, GAME_RESULT, GAME_MIC_ERROR };
+enum { GAME_FRAME_US = 33333 };
+static uint8_t game_screen;
+static uint32_t game_best;
+static meow_game_t game, game_paint;
+static bool game_ready, game_voiced, game_tutorial_done;
+static int64_t last_game_frame, fish_hint_until, delivery_hint_until;
+static lv_obj_t *game_view, *game_hint, *game_score, *game_totals;
 static const char *notice;
 
 enum {
@@ -233,7 +245,9 @@ static void update_header(const web_status_t *web, time_t now)
     static uint32_t wifi_color, bt_color;
     uint32_t network = web->hotspot ? 0xffd795 : web->wifi_connected ? ACCENT : INACTIVE;
     uint32_t bluetooth = quota_connected() ? ACCENT : INACTIVE;
-    lv_obj_set_style_text_opa(bluetooth_icon, quota_ble_enabled() ? LV_OPA_COVER : LV_OPA_30, 0);
+    lv_opa_t bt_opacity = quota_ble_enabled() ? LV_OPA_COVER : LV_OPA_30;
+    if (lv_obj_get_style_text_opa(bluetooth_icon, 0) != bt_opacity)
+        lv_obj_set_style_text_opa(bluetooth_icon, bt_opacity, 0);
     if (network != wifi_color) {
         wifi_color = network;
         lv_obj_set_style_text_color(wifi_icon, color(network), 0);
@@ -258,13 +272,13 @@ static void update_header(const web_status_t *web, time_t now)
     }
 }
 
-static void render_image(const uint8_t *pixels, int width, int height)
+static void render_image_data(const uint8_t *pixels, int width, int height, size_t size, lv_color_format_t format)
 {
     lv_image_cache_drop(&image);
     image = (lv_image_dsc_t){
-        .header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_RGB565,
+        .header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = format,
                    .w = width, .h = height, .stride = width * 2},
-        .data_size = width * height * 2, .data = pixels,
+        .data_size = size, .data = pixels,
     };
     image_view = box(body, 0, 0, width, height, BG);
     lv_obj_t *bitmap = lv_image_create(image_view);
@@ -387,22 +401,32 @@ static void animation_icon(lv_obj_t *parent, int x, int y, uint32_t ink)
     box(parent, x + 2, y + 16, 6, 1, ink);
 }
 
+static void game_icon(lv_obj_t *parent, int x, int y, uint32_t ink, uint32_t face)
+{
+    rounded_box(parent, x, y, 22, 14, ink, 5);
+    box(parent, x + 4, y + 6, 7, 2, face);
+    box(parent, x + 6, y + 4, 2, 6, face);
+    box(parent, x + 13, y + 7, 2, 2, face);
+    box(parent, x + 16, y + 4, 2, 2, face);
+}
+
 static void page_icons(void)
 {
     rounded_box(body, 16, 240, 208, 32, SURFACE, 12);
     for (unsigned i = 0; i < sizeof(display_pages) / sizeof(*display_pages); ++i) {
-        int x = 22 + 38 * i;
+        int x = 22 + 32 * i;
         uint8_t page = display_pages[i];
         bool active = page == preferences.page;
         uint32_t ink = active ? INK : MUTED;
-        if (active) rounded_box(body, x, 243, 34, 26, ACCENT, 8);
-        if (page == BADGE) identity_icon(body, x + 6, 247, ink);
-        else if (page == QUOTA) quota_icon(body, x + 6, 246, ink);
-        else if (page == PHOTO) label(body, LV_SYMBOL_IMAGE, x + 7, 246, &lv_font_montserrat_20, ink);
-        else animation_icon(body, x + 6, 247, ink);
+        if (active) rounded_box(body, x, 243, 30, 26, ACCENT, 8);
+        if (page == BADGE) identity_icon(body, x + 4, 247, ink);
+        else if (page == QUOTA) quota_icon(body, x + 4, 246, ink);
+        else if (page == PHOTO) label(body, LV_SYMBOL_IMAGE, x + 5, 246, &lv_font_montserrat_20, ink);
+        else if (page == CITY) animation_icon(body, x + 4, 247, ink);
+        else game_icon(body, x + 4, 249, ink, active ? ACCENT : SURFACE);
     }
-    box(body, 176, 249, 1, 14, TRACK);
-    label(body, LV_SYMBOL_SETTINGS, 190, 246, &lv_font_montserrat_20, MUTED);
+    box(body, 185, 249, 1, 14, TRACK);
+    label(body, LV_SYMBOL_SETTINGS, 194, 246, &lv_font_montserrat_20, MUTED);
 }
 
 static void empty_state(void)
@@ -1009,6 +1033,20 @@ static void update_city_frame(time_t wall, int64_t now)
     pixel_city_update(&city, wall >= 1700000000 ? local_clock(wall).tm_hour : -1, now / 1000);
 }
 
+static int64_t photo_render_started;
+static size_t photo_render_bytes;
+
+static void photo_render_ready(lv_event_t *event)
+{
+    (void)event;
+    photo_jpeg_finish_frame();
+    if (!photo_render_started) return;
+    unsigned elapsed = esp_timer_get_time() - photo_render_started;
+    ESP_LOGI("passport", "Photo frame submitted: %u bytes, %u ms", (unsigned)photo_render_bytes,
+             (elapsed + 500) / 1000);
+    photo_render_started = 0;
+}
+
 static uint8_t selected_photo(void)
 {
     photo_album_t album = photo_album_snapshot();
@@ -1034,7 +1072,8 @@ static void render_photo_counter(void)
 
 static void update_completion_toast(int64_t now, int64_t until)
 {
-    bool visible = quota_connected() && now < until && preferences.page != SETTINGS;
+    bool visible = quota_connected() && now < until && preferences.page != SETTINGS &&
+        (preferences.page != GAME || game_screen == GAME_COVER);
     if (visible && !completion_toast) {
         completion_toast = rounded_box(root, 44, 253, 152, 26, SURFACE, 10);
         label(completion_toast, LV_SYMBOL_OK, 13, 5, &lv_font_montserrat_14, ACCENT);
@@ -1045,18 +1084,177 @@ static void update_completion_toast(int64_t now, int64_t until)
     }
 }
 
+static void start_game(bool retry, int64_t now)
+{
+    if (retry) meow_game_reset(&game, (uint32_t)now, !game_tutorial_done);
+    fish_hint_until = delivery_hint_until = 0;
+    // 暂停切断一次发声；恢复后须重新发声，旧喵不能触发空中变招。
+    game.seen_onset = game.jump_voice = 0;
+    game_ready = game_voiced = false;
+    last_game_frame = now;
+    game_screen = music_game_capture(true) == ESP_OK ? GAME_PLAY : GAME_MIC_ERROR;
+    dirty = true;
+}
+
+static void stop_game(uint8_t screen)
+{
+    music_game_capture(false);
+    game_screen = screen;
+    dirty = true;
+}
+
+static void save_game_record(void)
+{
+    uint32_t score = meow_distance(&game);
+    if (score <= game_best) return;
+    esp_err_t err = save_meow_best(score);
+    if (err == ESP_OK) game_best = score;
+    else {
+        ESP_LOGE("passport", "Save game distance: %s", esp_err_to_name(err));
+        notice = "保存失败";
+    }
+}
+
+static bool tick_game(int64_t now)
+{
+    if (game_screen != GAME_PLAY || now - last_game_frame < GAME_FRAME_US) return false;
+    unsigned elapsed = (now - last_game_frame) / 1000;
+    last_game_frame += elapsed * 1000;
+    meow_voice_t voice = music_game_voice();
+    if (voice.failed) {
+        stop_game(GAME_MIC_ERROR);
+        return false;
+    }
+    if (!voice.ready) return false;
+    game_voiced = voice.voiced;
+    if (voice.onset != game.seen_onset) last_input = now;
+    // 麦克风启动时角色停在原地，长时间丢帧后也不跳过大量路线。
+    uint32_t fish = game.fish, deliveries = game.deliveries;
+    bool was_teaching = game.teaching_left != 0;
+    meow_game_step(&game, game_ready ? (elapsed > 100 ? 100 : elapsed) : 0, voice);
+    game_ready = true;
+    if (was_teaching && game.teaching_left == 0) {
+        game_tutorial_done = true;
+        esp_err_t err = save_meow_tutorial();
+        if (err != ESP_OK) ESP_LOGE("passport", "Save game tutorial: %s", esp_err_to_name(err));
+    }
+    if (game.fish != fish) fish_hint_until = now + 750000;
+    if (game.deliveries != deliveries) delivery_hint_until = now + 1000000;
+    if (game.motion == MEOW_DONE) {
+        stop_game(GAME_RESULT);
+        save_game_record();
+    }
+    return true;
+}
+
+static void update_game_stats(void)
+{
+    char text[48];
+    snprintf(text, sizeof text, "%u m", (unsigned)meow_distance(&game));
+    set_label(game_score, text);
+    snprintf(text, sizeof text, "鱼干 %u    送达 %u", (unsigned)game.fish, (unsigned)game.deliveries);
+    set_label(game_totals, text);
+}
+
+static void update_game_view(void)
+{
+    game_paint = game;
+    const meow_obstacle_t *next = &game.track[MEOW_CURRENT];
+    const char *hint = game.rescue_used ? "救援已用" : "";
+    if (game.teaching_left) hint = "短声跳　拖长伸爪";
+    char delivered[32];
+    if (!game_ready) hint = "麦克风准备中";
+    else if (game.motion == MEOW_FALL) hint = game.retry_fall ? "抓住屋檐！" : "掉下去啦";
+    else if (last_game_frame < delivery_hint_until) {
+        snprintf(delivered, sizeof delivered, "已送达 × %u", (unsigned)game.deliveries);
+        hint = delivered;
+    } else if (game.motion == MEOW_REACH || game.motion == MEOW_PULL) hint = "伸爪！";
+    else if (last_game_frame < fish_hint_until) hint = "鱼干到手！";
+    else if (next->start - game.x / MEOW_UNIT < 112) {
+        switch (next->kind) {
+        case MEOW_BOX: hint = game.teaching_left ? "矮箱 · 短声" : "矮箱"; break;
+        case MEOW_GAP: hint = game.teaching_left ? "宽缝 · 拖长" : "宽缝"; break;
+        case MEOW_AWNING: hint = "雨棚 · 短声捡鱼"; break;
+        case MEOW_CART: hint = "推车 · 看准再跳"; break;
+        default: break;
+        }
+    }
+    set_label(game_hint, hint);
+    lv_color_t ink = color(game_voiced ? 0xffc078 : 0xffe3ad);
+    if (lv_color_to_int(lv_obj_get_style_text_color(game_hint, 0)) != lv_color_to_int(ink))
+        lv_obj_set_style_text_color(game_hint, ink, 0);
+    update_game_stats();
+    lv_obj_invalidate(game_view);
+}
+
+static void render_game(void)
+{
+    if (game_screen == GAME_COVER) {
+        meow_game_reset(&game_paint, 0, true);
+        game_paint.x = 182 * MEOW_UNIT;
+        meow_view_bind(box(body, 16, 8, 208, 130, BG), &game_paint);
+        centered(body, "喵喵快递", 144, &passport_game, 0xffe3ad);
+        lv_obj_t *record = centered(body, "", 170, &passport_game, MUTED);
+        if (notice) lv_label_set_text(record, notice);
+        else lv_label_set_text_fmt(record, "最远纪录 %u m", (unsigned)game_best);
+        lv_obj_t *start = rounded_box(body, 59, 200, 122, 29, 0xffb362, 8);
+        lv_obj_center(label(start, "开始", 0, 0, &passport_game, INK));
+        page_icons();
+        return;
+    }
+
+    lv_obj_set_style_bg_color(body, color(0x211b39), 0);
+    label(body, "喵喵快递", 14, 14, &passport_game, 0xffe3ad);
+    game_score = label(body, "", 100, 14, &passport_game, 0xffe3ad);
+    lv_obj_set_width(game_score, 124);
+    lv_obj_set_style_text_align(game_score, LV_TEXT_ALIGN_RIGHT, 0);
+    game_view = box(body, 0, 40, WIDTH, 212, BG);
+    game_paint = game;
+    meow_view_bind(game_view, &game_paint);
+    game_hint = label(body, "", 16, 258, &passport_game, 0xffe3ad);
+    game_totals = label(body, "", 16, 281, &passport_game, 0xe8abc2);
+    lv_obj_set_width(game_totals, 208);
+    lv_label_set_long_mode(game_totals, LV_LABEL_LONG_DOT);
+    centered(body, "长按确认返回", 303, &passport_caption, 0xc9adc9);
+    if (game_screen == GAME_PLAY) {
+        update_game_view();
+        return;
+    }
+
+    update_game_stats();
+    if (game_screen == GAME_RESULT) {
+        rounded_box(body, 20, 81, 200, 139, 0x302244, 10);
+        centered(body, "配送结束", 92, &passport_game, 0xffe3ad);
+        lv_obj_t *distance = centered(body, "", 115, &passport_game, TEXT);
+        lv_label_set_text_fmt(distance, "跑了 %u m", (unsigned)meow_distance(&game));
+        lv_obj_t *totals = centered(body, "", 138, &passport_game, TEXT);
+        lv_label_set_text_fmt(totals, "鱼干 %u    送达 %u", (unsigned)game.fish, (unsigned)game.deliveries);
+        lv_obj_t *record = centered(body, notice ? notice : "", 161, &passport_game, 0xe8abc2);
+        if (!notice) lv_label_set_text_fmt(record, "最远纪录 %u m", (unsigned)game_best);
+        centered(body, "确认重试", 188, &passport_game, 0xffb362);
+    } else {
+        bool paused = game_screen == GAME_PAUSED;
+        rounded_box(body, 25, 108, 190, 73, 0x302244, 10);
+        centered(body, paused ? "已暂停" : "麦克风不可用", 119, &passport_game, 0xffe3ad);
+        centered(body, paused ? "确认继续" : "确认重试", 148, &passport_game, 0xffb362);
+    }
+}
+
 static void rebuild(const web_status_t *web, passport_profile_t content, quota_snapshot_t quota, time_t now, int passkey)
 {
     lv_obj_clean(body);
     city_title = NULL;
     photo_counter = NULL;
     city_render.samples = 0;
+    photo_render_started = 0;
     image_view = NULL;
     image_detached = false;
     bool photo = preferences.page == PHOTO;
     bool city_page = preferences.page == CITY;
-    bool full = photo || city_page;
-    if (photo) lv_obj_add_flag(header, LV_OBJ_FLAG_HIDDEN);
+    bool playing = preferences.page == GAME && game_screen != GAME_COVER;
+    bool full = photo || city_page || playing;
+    lv_obj_set_style_bg_color(body, color(BG), 0);
+    if (photo || playing) lv_obj_add_flag(header, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_remove_flag(header, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_y(body, full ? 0 : HEADER_HEIGHT);
     lv_obj_set_height(body, full ? HEIGHT : HEIGHT - HEADER_HEIGHT);
@@ -1065,9 +1263,10 @@ static void rebuild(const web_status_t *web, passport_profile_t content, quota_s
     const uint8_t *pixels;
     switch (preferences.page) {
     case BADGE:
+        displayed_badge = content.badge;
         pixels = asset_data(false, content.badge);
         if (pixels) {
-            render_image(pixels, WIDTH, HEIGHT - HEADER_HEIGHT);
+            render_image_data(pixels, WIDTH, HEIGHT - HEADER_HEIGHT, BADGE_PIXELS, LV_COLOR_FORMAT_RGB565);
             // 112×176 版拥有固定右栏；更早的方形头像版保留原始整页布局。
             if (content.portrait) align_identity_text(pixels);
         }
@@ -1076,10 +1275,16 @@ static void rebuild(const web_status_t *web, passport_profile_t content, quota_s
         }
         page_icons();
         break;
-    case PHOTO:
-        pixels = asset_data(true, selected_photo());
-        if (pixels) {
-            render_image(pixels, WIDTH, HEIGHT);
+    case PHOTO: {
+        uint8_t slot = selected_photo();
+        displayed_photo = slot;
+        pixels = asset_data(true, slot);
+        size_t size = photo_asset_size(slot);
+        if (pixels && size) {
+            photo_render_bytes = size;
+            photo_render_started = esp_timer_get_time();
+            render_image_data(pixels, WIDTH, HEIGHT, size,
+                              size == PHOTO_BYTES ? LV_COLOR_FORMAT_RGB565 : LV_COLOR_FORMAT_RAW);
             render_photo_counter();
         }
         else {
@@ -1089,6 +1294,7 @@ static void rebuild(const web_status_t *web, passport_profile_t content, quota_s
             centered(body, "长按确认进入设置", 226, &passport_caption, MUTED);
         }
         break;
+    }
     case QUOTA: render_quota(quota, now); break;
     case CITY: {
         static const char *const names[PIXEL_SCENE_COUNT] = {
@@ -1111,6 +1317,7 @@ static void rebuild(const web_status_t *web, passport_profile_t content, quota_s
         update_city_frame(now, frame_at);
         break;
     }
+    case GAME: render_game(); break;
     case SETTINGS: render_settings(web, passkey); break;
     }
 }
@@ -1285,8 +1492,24 @@ static void handle_button(uint8_t key, int64_t now)
         return;
     }
     notice = NULL;
-    dirty = true;
+    if (preferences.page == GAME) {
+        if (game_screen != GAME_COVER) {
+            if (key == 3) {
+                stop_game(GAME_COVER);
+                save_game_record();
+            } else if (key == BSP_BTN_OK) {
+                if (game_screen == GAME_PLAY) stop_game(GAME_PAUSED);
+                else start_game(game_screen == GAME_RESULT, now);
+            }
+            return;
+        }
+        if (key == BSP_BTN_OK) {
+            start_game(true, now);
+            return;
+        }
+    }
     if (key == 3) {
+        dirty = true;
         // 长按统一进入设置，或从设置逐级返回。
         if (preferences.page == SETTINGS) {
             if (editing >= 0) {
@@ -1317,9 +1540,11 @@ static void handle_button(uint8_t key, int64_t now)
     }
     if (preferences.page != SETTINGS) {
         if (key == BSP_BTN_OK && preferences.page == CITY) {
+            dirty = true;
             preferences.scene = (preferences.scene + 1) % PIXEL_SCENE_COUNT;
             city_title_until = persist(PREF_SCENE) == ESP_OK ? now + 2000000 : 0;
         } else if (key == BSP_BTN_OK && preferences.page == QUOTA) {
+            dirty = true;
             preferences.quota_focus = !preferences.quota_focus;
             persist(PREF_QUOTA_VIEW);
         } else if (key == BSP_BTN_OK && preferences.page == PHOTO) {
@@ -1327,6 +1552,7 @@ static void handle_button(uint8_t key, int64_t now)
             if (err == ESP_OK) photo_counter_until = now + 1800000;
             else if (err != ESP_ERR_NOT_FOUND) ESP_LOGE("passport", "Save photo selection: %s", esp_err_to_name(err));
         } else if (key < BSP_BTN_OK) {
+            dirty = true;
             music_stop();
             city_title_until = 0;
             const unsigned count = sizeof(display_pages) / sizeof(*display_pages);
@@ -1337,6 +1563,7 @@ static void handle_button(uint8_t key, int64_t now)
         }
         return;
     }
+    dirty = true;
     if (editing >= 0) {
         if (key == BSP_BTN_OK) {
             esp_err_t err = save_editor();
@@ -1455,6 +1682,9 @@ static void handle_button(uint8_t key, int64_t now)
 
 static void button_event(bsp_btn_t button, bsp_btn_ev_t event, void *arg)
 {
+    // BSP callbacks are serialized by the button timer. React to a debounced
+    // release immediately since the UI has no double-click actions.
+    static bool held_long[BSP_BTN_COUNT];
     int64_t now = esp_timer_get_time();
     portENTER_CRITICAL(&input_lock);
     bool ignored = ignore_wake_key || now < ignore_keys_until;
@@ -1463,11 +1693,18 @@ static void button_event(bsp_btn_t button, bsp_btn_ev_t event, void *arg)
         ignore_keys_until = now + 300000;
     }
     portEXIT_CRITICAL(&input_lock);
-    if (ignored) return;
-    uint8_t key = button;
-    if (event == BSP_BTN_LONG && button == BSP_BTN_OK) key = 3;
-    else if (event != BSP_BTN_CLICK) return;
-    xQueueSend(buttons, &key, 0);
+    if (event == BSP_BTN_PRESS) {
+        held_long[button] = false;
+    } else if (event == BSP_BTN_LONG) {
+        held_long[button] = true;
+        if (!ignored && button == BSP_BTN_OK) {
+            uint8_t key = 3;
+            xQueueSend(buttons, &key, 0);
+        }
+    } else if (event == BSP_BTN_RELEASE && !ignored && !held_long[button]) {
+        uint8_t key = button;
+        xQueueSend(buttons, &key, 0);
+    }
 }
 
 static void display_log(lv_log_level_t level, const char *message)
@@ -1494,6 +1731,9 @@ void app_main(void)
 {
     ESP_ERROR_CHECK(storage_init());
     preferences = preferences_snapshot();
+    game_best = load_meow_best();
+    // 首个无尽版在 35 米左右过完教学；旧纪录达到 36 米就已通过。
+    game_tutorial_done = load_meow_tutorial() || game_best >= 36;
     power_init();
     ESP_ERROR_CHECK(bsp_display_init());
     lv_display_t *display = bsp_lvgl_init();
@@ -1513,7 +1753,9 @@ void app_main(void)
     web_init();
     quota_ble_init();
     assert(bsp_lvgl_lock(0));
+    ESP_ERROR_CHECK(photo_jpeg_install_decoder() ? ESP_OK : ESP_ERR_NOT_FOUND);
     init_screen();
+    lv_display_add_event_cb(display, photo_render_ready, LV_EVENT_REFR_READY, NULL);
     lv_display_add_event_cb(display, city_render_event, LV_EVENT_RENDER_START, NULL);
     lv_display_add_event_cb(display, city_render_event, LV_EVENT_RENDER_READY, NULL);
     web_status_t initial_web = web_status();
@@ -1525,7 +1767,6 @@ void app_main(void)
     bsp_lvgl_unlock();
     last_input = esp_timer_get_time();
     time_t last_minute = -1;
-    uint8_t last_badge = 0, last_photo = 0;
     uint32_t last_quota = 0;
     int last_passkey = -2;
     bool last_connected = false, last_web_client = false, last_paired = false;
@@ -1540,19 +1781,26 @@ void app_main(void)
             const int64_t remaining = next_city_frame - esp_timer_get_time();
             wait_ms = remaining > 0 ? (remaining + 999) / 1000 : 0;
         }
+        if (preferences.page == GAME && game_screen == GAME_PLAY && !dark) {
+            int64_t remaining = last_game_frame + GAME_FRAME_US - esp_timer_get_time();
+            wait_ms = remaining > 0 ? (remaining + 999) / 1000 : 0;
+        }
         bool pressed = xQueueReceive(buttons, &key, pdMS_TO_TICKS(wait_ms));
         int64_t now = esp_timer_get_time();
         passport_preferences_t updated = preferences_snapshot();
-        if (updated.brightness != preferences.brightness || updated.volume != preferences.volume ||
+        bool brightness_changed = updated.brightness != preferences.brightness;
+        bool volume_changed = updated.volume != preferences.volume;
+        if (brightness_changed || volume_changed ||
             updated.sleep_seconds != preferences.sleep_seconds || updated.power_mode != preferences.power_mode ||
             updated.deep_sleep_seconds != preferences.deep_sleep_seconds) {
-            if (!dark) bsp_display_backlight(updated.brightness);
-            music_set_volume(updated.volume);
-            dirty = true;
+            if (brightness_changed && !dark) bsp_display_backlight(updated.brightness);
+            if (volume_changed) music_set_volume(updated.volume);
+            if (preferences.page == SETTINGS) dirty = true;
             last_input = now;
         }
         preferences = updated;
         if (pressed) handle_button(key, now);
+        bool game_frame = preferences.page == GAME && !dark && tick_game(now);
         web_poll();
         log_runtime_budget(pressed);
         if (web_visible && web_expired()) { close_detail(); dirty = true; }
@@ -1562,6 +1810,7 @@ void app_main(void)
         idle_action_t idle = power_idle_action(&preferences, (now - last_input) / 1000000,
                                                 dark, web_visible || pairing_visible);
         if (idle != IDLE_KEEP_RUNNING) {
+            if (game_screen == GAME_PLAY) stop_game(GAME_PAUSED);
             music_stop();
             esp_err_t err;
             if (idle == IDLE_DEEP_SLEEP) err = power_deep_sleep();
@@ -1577,7 +1826,7 @@ void app_main(void)
         // 息屏时蓝牙还能接收完成事件。以事件的到期时间去重，重绘页面不会重播。
         if (!boot_music_pending && now < completion_until && completion_until != last_chime) {
             last_chime = completion_until;
-            music_completion_chime();
+            if (game_screen != GAME_PLAY) music_completion_chime();
         }
         if (dark) continue;
         web_status_t web = web_status();
@@ -1611,9 +1860,10 @@ void app_main(void)
         last_music = music;
         if (!bsp_lvgl_lock(100)) continue;
         passport_profile_t content = profile_snapshot();
-        uint8_t current_photo = selected_photo();
         if (preferences.page != PHOTO) update_header(&web, wall);
-        if (dirty || image_detached || last_badge != content.badge || last_photo != current_photo ||
+        if (dirty || image_detached ||
+            (preferences.page == BADGE && displayed_badge != content.badge) ||
+            (preferences.page == PHOTO && displayed_photo != selected_photo()) ||
             (preferences.page == QUOTA && (last_quota != quota.updated_at ||
              last_minute != wall / 60 || last_connected != connected)) ||
             (web_visible && strcmp(last_url, web.url)) ||
@@ -1621,6 +1871,8 @@ void app_main(void)
             (pairing_visible && (last_passkey != passkey || last_connected != connected))) {
             rebuild(&web, content, quota, wall, passkey);
             dirty = false;
+        } else if (game_frame && game_screen == GAME_PLAY) {
+            update_game_view();
         } else if (preferences.page == CITY) {
             update_city_frame(wall, esp_timer_get_time());
         }
@@ -1632,10 +1884,8 @@ void app_main(void)
         bsp_lvgl_unlock();
         if (boot_music_pending) {
             boot_music_pending = false;
-            music_boot();
+            if (game_screen != GAME_PLAY) music_boot();
         }
-        last_badge = content.badge;
-        last_photo = current_photo;
         last_quota = quota.updated_at;
         last_minute = wall / 60;
         last_passkey = passkey;

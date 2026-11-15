@@ -23,6 +23,7 @@ static uint8_t completion_volume = MUSIC_VOLUME_FOLLOW;
 typedef struct {
     music_score_t score;
     uint8_t volume;
+    uint32_t capture_session;
 } audio_command_t;
 static nvs_handle_t store;
 static SemaphoreHandle_t config_lock;
@@ -30,6 +31,9 @@ static QueueHandle_t playback;
 static SemaphoreHandle_t audio_stopped;
 static esp_err_t shutdown_result;
 #define AUDIO_SHUTDOWN UINT16_MAX
+static portMUX_TYPE capture_lock = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t capture_session;
+static meow_voice_t capture_voice;
 static portMUX_TYPE volume_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint8_t output_volume;
 static int16_t sine_table[256];
@@ -295,6 +299,57 @@ static esp_err_t play_score(const audio_command_t *command)
     return ESP_OK;
 }
 
+esp_err_t music_game_capture(bool active)
+{
+    if (!playback) return ESP_ERR_INVALID_STATE;
+    portENTER_CRITICAL(&capture_lock);
+    uint32_t session = ++capture_session;
+    if (!session) session = ++capture_session;
+    capture_voice = (meow_voice_t){0};
+    portEXIT_CRITICAL(&capture_lock);
+    if (active) {
+        const audio_command_t command = {.capture_session = session};
+        xQueueOverwrite(playback, &command);
+    }
+    return ESP_OK;
+}
+
+meow_voice_t music_game_voice(void)
+{
+    portENTER_CRITICAL(&capture_lock);
+    meow_voice_t voice = capture_voice;
+    portEXIT_CRITICAL(&capture_lock);
+    return voice;
+}
+
+static bool capture_publish(uint32_t session, meow_voice_t voice)
+{
+    portENTER_CRITICAL(&capture_lock);
+    bool active = session == capture_session;
+    if (active) capture_voice = voice;
+    portEXIT_CRITICAL(&capture_lock);
+    return active;
+}
+
+static esp_err_t capture_meow(uint32_t session)
+{
+    if (!capture_publish(session, (meow_voice_t){0})) return ESP_OK;
+    bsp_audio_set_volume(0);
+    esp_err_t err = bsp_audio_wake();
+    meow_detector_t detector = {0};
+    int16_t pcm[MEOW_PCM_SAMPLES];
+    unsigned warmup = 4; // 跳过 codec 启动后的前 40 ms。
+    while (err == ESP_OK && !uxQueueMessagesWaiting(playback) && capture_publish(session, detector.voice)) {
+        err = bsp_audio_read(pcm, sizeof pcm, 45);
+        if (err == ESP_OK) {
+            if (warmup) --warmup;
+            else meow_detect(&detector, pcm);
+        }
+    }
+    if (err != ESP_OK) capture_publish(session, (meow_voice_t){.failed = true});
+    return err;
+}
+
 static void audio_worker(void *arg)
 {
     audio_command_t command;
@@ -307,6 +362,11 @@ static void audio_worker(void *arg)
             shutdown_result = bsp_audio_prepare_deep_sleep();
             xSemaphoreGive(audio_stopped);
             for (;;) vTaskSuspend(NULL);
+        }
+        if (command.capture_session) {
+            err = capture_meow(command.capture_session);
+            if (err != ESP_OK) ESP_LOGE(TAG, "Game microphone: %s", esp_err_to_name(err));
+            continue;
         }
         if (!command.score.count) continue;
         err = play_score(&command);

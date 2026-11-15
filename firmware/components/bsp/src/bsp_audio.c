@@ -559,9 +559,12 @@ esp_err_t bsp_audio_write(const void *pcm, size_t bytes) {
     return esp_codec_dev_write(s_dev, (void *)pcm, bytes) == 0 ? ESP_OK : ESP_FAIL;
 }
 
-esp_err_t bsp_audio_read(void *pcm, size_t bytes) {
+esp_err_t bsp_audio_read(void *pcm, size_t bytes, uint32_t timeout_ms) {
     if (!s_dev || !s_opened || s_sleeping) return ESP_ERR_INVALID_STATE;
-    return esp_codec_dev_read(s_dev, pcm, bytes) == 0 ? ESP_OK : ESP_FAIL;
+    // codec-dev 封装的等待上限为 1 s；游戏暂停需在当前 PCM 帧后释放音频总线。
+    size_t received = 0;
+    esp_err_t err = i2s_channel_read(s_rx, pcm, bytes, &received, timeout_ms);
+    return err != ESP_OK ? err : received == bytes ? ESP_OK : ESP_FAIL;
 }
 
 void bsp_audio_set_volume(uint8_t percent) {

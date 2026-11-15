@@ -12,8 +12,12 @@ static esp_err_t erase_error, commit_error;
 static uint8_t saved_blob[sizeof(passport_preferences_t)];
 static bool reload_blob;
 static uint8_t ble_flag;
+static uint32_t record;
+static bool record_exists, tutorial_done;
 static bool ble_exists;
 static bool album_exists;
+static bool legacy_album_exists;
+static uint8_t legacy_album[4];
 static photo_album_t album_blob;
 static passport_profile_t legacy_profile;
 static uint8_t upload[PHOTO_BYTES];
@@ -33,6 +37,12 @@ esp_err_t nvs_open(const char *name, int mode, nvs_handle_t *out)
 }
 void nvs_close(nvs_handle_t handle) {}
 esp_err_t nvs_get_blob(nvs_handle_t handle, const char *key, void *out, size_t *size) {
+    if (!strcmp(key, legacy_album_key) && legacy_album_exists) {
+        assert(*size >= sizeof legacy_album);
+        memcpy(out, legacy_album, sizeof legacy_album);
+        *size = sizeof legacy_album;
+        return ESP_OK;
+    }
     if (!strcmp(key, album_key) && album_exists) {
         assert(*size >= sizeof album_blob);
         memcpy(out, &album_blob, sizeof album_blob);
@@ -76,11 +86,37 @@ esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key, const void *data, s
 }
 esp_err_t nvs_commit(nvs_handle_t handle) { return commit_error; }
 esp_err_t nvs_get_u8(nvs_handle_t handle, const char *key, uint8_t *out)
-{ if (handle==1 && !strcmp(key,"ble_off")) { if(!ble_exists)return ESP_ERR_NVS_NOT_FOUND; *out=ble_flag;return ESP_OK; }
+{ if (handle == 1 && !strcmp(key, "meow_tutorial")) {
+      if (!tutorial_done) return ESP_ERR_NVS_NOT_FOUND;
+      *out = 1;
+      return ESP_OK;
+  }
+  if (handle==1 && !strcmp(key,"ble_off")) { if(!ble_exists)return ESP_ERR_NVS_NOT_FOUND; *out=ble_flag;return ESP_OK; }
   assert(handle == 2 && !strcmp(key, "pending")); if (!pending_exists) return ESP_ERR_NVS_NOT_FOUND; *out = pending_action; return ESP_OK; }
 esp_err_t nvs_set_u8(nvs_handle_t handle, const char *key, uint8_t value)
-{ if(handle==1 && !strcmp(key,"ble_off")) { ble_exists=true;ble_flag=value;return ESP_OK; }
+{ if (handle == 1 && !strcmp(key, "meow_tutorial")) {
+      assert(value == 1);
+      if (!commit_error) tutorial_done = true;
+      return ESP_OK;
+  }
+  if(handle==1 && !strcmp(key,"ble_off")) { ble_exists=true;ble_flag=value;return ESP_OK; }
   assert(handle == 2 && !strcmp(key, "pending")); pending_exists = true; pending_action = value; return ESP_OK; }
+esp_err_t nvs_get_u32(nvs_handle_t handle, const char *key, uint32_t *out)
+{
+    assert(handle == 1 && !strcmp(key, "meow_distance"));
+    if (!record_exists) return ESP_ERR_NVS_NOT_FOUND;
+    *out = record;
+    return ESP_OK;
+}
+esp_err_t nvs_set_u32(nvs_handle_t handle, const char *key, uint32_t value)
+{
+    assert(handle == 1 && !strcmp(key, "meow_distance"));
+    if (!commit_error) {
+        record_exists = true;
+        record = value;
+    }
+    return ESP_OK;
+}
 esp_err_t nvs_erase_key(nvs_handle_t handle, const char *key)
 { assert(handle == 2 && !strcmp(key, "pending")); pending_exists = false; return ESP_OK; }
 esp_err_t nvs_erase_all(nvs_handle_t handle)
@@ -119,59 +155,81 @@ int httpd_req_recv(httpd_req_t *req, char *out, size_t size)
 bool detach_display_asset(const uint8_t *pixels) { return true; }
 const char *esp_err_to_name(int err) { return "test error"; }
 
+bool photo_jpeg_valid(const uint8_t *data, size_t size)
+{
+    return size == 80 && data[0] != 0;
+}
+
+size_t photo_jpeg_from_rgb565(const uint8_t *pixels, uint8_t *jpeg)
+{
+    memset(jpeg, pixels[0], 80);
+    return 80;
+}
+
 static void test_photo_album(void)
 {
     legacy_profile.photo = 2;
     legacy_profile.badge = 1;
-    memset(flash + PHOTO_SLOT_BYTES, 0x25, PHOTO_BYTES);
     memset(flash + 0x50000, 0x75, BADGE_BYTES);
-    assert(storage_init() == ESP_OK);
-    assert(photo_album_snapshot().slots[0] == 2 && !album_exists);
-    assert(*asset_data(true, 2) == 0x25);
-    assert(select_next_photo() == ESP_ERR_NOT_FOUND && !album_exists);
+    memset(flash + photo_offsets[1], 0x25, PHOTO_BYTES);
+    commit_error = ESP_FAIL;
+    assert(storage_init() == ESP_OK && !album_exists);
+    uint8_t old_slot = photo_album_snapshot().slots[0];
+    assert(photo_asset_size(old_slot) == PHOTO_BYTES && *asset_data(true, old_slot) == 0x25);
 
-    memset(upload, 0x82, sizeof upload);
-    uint32_t crc = esp_rom_crc32_le(0, upload, sizeof upload);
-    httpd_req_t req = {.content_len = PHOTO_BYTES};
-    upload_length = PHOTO_BYTES;
-    assert(receive_photo(&req, 2, crc) == ESP_OK);
-    assert(select_next_photo() == ESP_OK);
-    assert(storage_init() == ESP_OK && photo_album_snapshot().selected == 2);
+    // 模拟真实三张旧图布局，第四槽曾参与替换，关机前选在第三张。
+    legacy_album_exists = true;
+    memcpy(legacy_album, (uint8_t[]){2, 4, 1, 2}, sizeof legacy_album);
+    memset(flash + photo_offsets[3], 0x49, PHOTO_BYTES);
+    memset(flash + photo_offsets[0], 0x82, PHOTO_BYTES);
+    commit_error = ESP_OK;
+    assert(storage_init() == ESP_OK && album_exists);
+    photo_album_t migrated = photo_album_snapshot();
+    assert(migrated.selected == 2 && *asset_data(false, 1) == 0x75);
+    const uint8_t markers[] = {0x25, 0x49, 0x82};
+    for (size_t i = 0; i < sizeof markers; ++i) {
+        assert(migrated.slots[i] <= JPEG_SLOTS && migrated.bytes[i] == 80);
+        assert(*asset_data(true, migrated.slots[i]) == markers[i]);
+    }
 
-    memset(upload, 0x49, sizeof upload);
-    crc = esp_rom_crc32_le(0, upload, sizeof upload);
+    memset(upload, 0x58, 80);
+    uint32_t crc = esp_rom_crc32_le(0, upload, 80);
+    httpd_req_t req = {.content_len = 80};
+    upload_length = 80;
+    for (unsigned i = 3; i < PHOTO_CAPACITY; ++i) {
+        upload_at = 0;
+        assert(receive_photo(&req, i, crc) == ESP_OK);
+    }
+    const photo_album_t before = photo_album_snapshot();
+    assert(before.selected == 2 && before.slots[5]);
     upload_at = 0;
-    assert(receive_photo(&req, 1, crc) == ESP_OK);
-    photo_album_t before = photo_album_snapshot();
-    assert(before.slots[0] == 2 && before.slots[1] != before.slots[2]);
-    assert(*asset_data(true, before.slots[1]) == 0x49 && *asset_data(true, before.slots[2]) == 0x82);
-
-    // 传输中断、CRC 失败和目录提交失败都保留当前目录和旧照片。
-    upload_at = 0;
-    upload_length = 1024;
+    upload_length = 32;
     assert(receive_photo(&req, 0, crc) == ESP_ERR_TIMEOUT);
     upload_at = 0;
-    upload_length = PHOTO_BYTES;
+    upload_length = 80;
     assert(receive_photo(&req, 0, crc ^ 1) == ESP_ERR_INVALID_CRC);
+    upload_at = 0;
+    upload[0] = 0;
+    assert(receive_photo(&req, 0, esp_rom_crc32_le(0, upload, 80)) == ESP_ERR_INVALID_ARG);
+    upload[0] = 0x58;
     upload_at = 0;
     commit_error = ESP_FAIL;
     assert(receive_photo(&req, 0, crc) == ESP_FAIL);
     commit_error = ESP_OK;
     assert(storage_init() == ESP_OK);
     photo_album_t after = photo_album_snapshot();
-    assert(!memcmp(&before, &after, sizeof before) && *asset_data(true, 2) == 0x25);
+    assert(!memcmp(&before, &after, sizeof before));
+    assert(*asset_data(true, after.slots[0]) == 0x25);
 
     upload_at = 0;
     assert(receive_photo(&req, 0, crc) == ESP_OK);
     after = photo_album_snapshot();
-    assert(after.slots[0] == 4 && after.selected == 2 && *asset_data(true, 4) == 0x49);
-    assert(*asset_data(false, 1) == 0x75);
-    assert(select_photo(1) == ESP_OK && storage_init() == ESP_OK && photo_album_snapshot().selected == 1);
-    assert(select_photo(2) == ESP_OK && photo_album_snapshot().selected == 2);
-    assert(remove_photo(2) == ESP_OK && photo_album_snapshot().selected == 0);
-    assert(remove_photo(0) == ESP_OK && photo_album_snapshot().selected == 1);
-    assert(remove_photo(1) == ESP_OK && storage_init() == ESP_OK);
-    assert(!photo_album_snapshot().slots[0] && !photo_album_snapshot().slots[1] && !photo_album_snapshot().slots[2]);
+    assert(after.slots[0] != before.slots[0] && after.selected == 2);
+    assert(*asset_data(true, after.slots[0]) == 0x58);
+    assert(select_photo(5) == ESP_OK && storage_init() == ESP_OK && photo_album_snapshot().selected == 5);
+    assert(select_next_photo() == ESP_OK && photo_album_snapshot().selected == 0);
+    for (unsigned i = 0; i < PHOTO_CAPACITY; ++i) assert(remove_photo(i) == ESP_OK);
+    assert(storage_init() == ESP_OK && !photo_album_snapshot().slots[5]);
     assert(select_photo(0) == ESP_ERR_INVALID_ARG);
     commit_error = ESP_FAIL;
     assert(remove_badge() == ESP_FAIL && profile_snapshot().badge == 1 && *asset_data(false, 1) == 0x75);
@@ -240,6 +298,30 @@ int main(void)
     assert(preferences_snapshot().scene == PIXEL_PARK && preferences_snapshot().quota_focus);
     assert(update_preferences(PREF_QUOTA_VIEW, &state) == ESP_OK);
     assert(storage_init() == ESP_OK && !preferences_snapshot().quota_focus);
+    state.page = GAME;
+    state.return_page = CITY;
+    assert(update_preferences(PREF_PAGE, &state) == ESP_OK);
+    assert(saved_blob[0] == QUOTA && saved_blob[3] == QUOTA);
+    assert(storage_init() == ESP_OK);
+    assert(preferences_snapshot().page == GAME && preferences_snapshot().return_page == CITY);
+    assert(preferences_snapshot().scene == PIXEL_PARK);
+    state.page = SETTINGS;
+    state.return_page = GAME;
+    assert(update_preferences(PREF_PAGE, &state) == ESP_OK);
+    assert(saved_blob[0] == SETTINGS && saved_blob[3] == QUOTA);
+    assert(storage_init() == ESP_OK && preferences_snapshot().return_page == GAME);
+    assert(!load_meow_tutorial());
+    commit_error = ESP_FAIL;
+    assert(save_meow_tutorial() == ESP_FAIL && !load_meow_tutorial());
+    commit_error = ESP_OK;
+    assert(save_meow_tutorial() == ESP_OK);
+    assert(storage_init() == ESP_OK && load_meow_tutorial());
+    assert(load_meow_best() == 0);
+    assert(save_meow_best(1250) == ESP_OK);
+    assert(storage_init() == ESP_OK && load_meow_best() == 1250);
+    commit_error = ESP_FAIL;
+    assert(save_meow_best(1300) == ESP_FAIL && load_meow_best() == 1250);
+    commit_error = ESP_OK;
     state.return_page = SETTINGS;
     assert(update_preferences(PREF_PAGE, &state) == ESP_ERR_INVALID_ARG);
     device.deep_sleep_seconds=301;

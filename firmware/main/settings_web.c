@@ -218,9 +218,9 @@ static esp_err_t get_asset(httpd_req_t *req)
     const uint8_t *pixels = asset_data(photo, slot);
     if (!pixels) return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "No image");
     if (kind == GET_AVATAR) pixels += BADGE_PIXELS;
-    httpd_resp_set_type(req, "application/octet-stream");
     size_t length = value.portrait ? AVATAR_WIDTH * AVATAR_HEIGHT * 2 : LEGACY_AVATAR_SIZE * LEGACY_AVATAR_SIZE * 2;
-    if (photo) length = PHOTO_BYTES;
+    if (photo) length = photo_asset_size(slot);
+    httpd_resp_set_type(req, photo && length != PHOTO_BYTES ? "image/jpeg" : "application/octet-stream");
     if (kind == GET_BADGE) length += BADGE_PIXELS;
     return send_resource(req, pixels, length, photo ? "photo" : kind == GET_BADGE ? "badge" : "avatar");
 }
@@ -424,8 +424,8 @@ static esp_err_t put_asset(httpd_req_t *req)
     if (photo && index < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "照片位置无效");
     esp_err_t err = photo ? receive_photo(req, index, checksum) :
         receive_badge(req, checksum, name, has_subtitle ? subtitle : NULL, bio);
-    if (err == ESP_ERR_INVALID_SIZE || err == ESP_ERR_INVALID_CRC)
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "图片长度或校验有误");
+    if (err == ESP_ERR_INVALID_SIZE || err == ESP_ERR_INVALID_CRC || err == ESP_ERR_INVALID_ARG)
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "图片格式、长度或校验有误");
     if (err != ESP_OK)
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "保存失败，旧内容仍可使用");
     return httpd_resp_sendstr(req, "已同步到卡片");

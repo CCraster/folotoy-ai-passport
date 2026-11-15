@@ -1,5 +1,6 @@
 idf_component_register(
-    SRCS "main.c" "pixel_city.c" "storage.c" "storage_usage.c" "preferences.c" "power.c" "settings_web.c" "web_peer.c" "network.c" "portal.c" "portal_dns.c" "web_code.c" "quota_ble.c" "quota_protocol.c" "music.c" "rtttl.c" "fonts/passport_font.c"
+    SRCS "main.c" "pixel_city.c" "storage.c" "photo_jpeg.c" "storage_usage.c" "preferences.c" "power.c" "settings_web.c" "web_peer.c" "network.c" "portal.c" "portal_dns.c" "web_code.c" "quota_ble.c" "quota_protocol.c" "music.c" "rtttl.c"
+         "meow_delivery.c" "meow_view.c" "fonts/passport_game.c" "fonts/passport_font.c"
          "fonts/passport_heading.c" "fonts/passport_caption.c" "fonts/passport_quota.c"
     INCLUDE_DIRS "."
     REQUIRES bsp nvs_flash esp_partition esp_http_server esp_wifi esp_event esp_netif bt json esp_timer esp_pm esp_lcd app_update bootloader_support spi_flash

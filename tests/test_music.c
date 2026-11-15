@@ -9,6 +9,8 @@
 static audio_command_t queued;
 static unsigned pending, writes, stop_after, mute_after, fail_after;
 static bool audible;
+static unsigned mic_reads;
+static bool mic_fail;
 static esp_err_t commit_error;
 static bool has_saved, has_task_sound, has_task_volume;
 static uint8_t task_sound_value, task_volume_value, applied_volume;
@@ -60,6 +62,20 @@ const char *esp_err_to_name(esp_err_t err) { (void)err; return "test error"; }
 esp_err_t bsp_audio_init(void) { return ESP_OK; }
 esp_err_t bsp_audio_set_format(uint32_t hz, uint8_t bits, uint8_t ch) { assert(hz == 16000 && bits == 16 && ch == 1); return ESP_OK; }
 esp_err_t bsp_audio_wake(void) { return ESP_OK; }
+esp_err_t bsp_audio_read(void *pcm, size_t bytes, uint32_t timeout_ms)
+{
+    assert(bytes == MEOW_PCM_SAMPLES * sizeof(int16_t) && timeout_ms <= 50);
+    ++mic_reads;
+    if (mic_fail) return ESP_FAIL;
+    int16_t *samples = pcm;
+    for (unsigned i = 0; i < MEOW_PCM_SAMPLES; ++i) samples[i] = i % 2 ? 300 : -300;
+    if (mic_reads == 40) {
+        meow_voice_t voice = music_game_voice();
+        assert(voice.ready && voice.onset == 1 && voice.stretch == 1);
+        assert(music_game_capture(false) == ESP_OK);
+    }
+    return ESP_OK;
+}
 esp_err_t bsp_audio_sleep(void) { return ESP_OK; }
 esp_err_t bsp_audio_prepare_deep_sleep(void) { return ESP_OK; }
 void bsp_audio_set_volume(uint8_t percent) { assert(percent <= 100); applied_volume = percent; }
@@ -111,6 +127,17 @@ int main(void)
 {
     parse_contract();
     assert(music_init(40) == ESP_OK);
+    assert(music_game_capture(true) == ESP_OK && pending);
+    uint32_t session = queued.capture_session;
+    pending = 0;
+    assert(capture_meow(session) == ESP_OK && mic_reads == 40);
+    assert(!music_game_voice().ready);
+    assert(capture_meow(session) == ESP_OK && mic_reads == 40);
+    assert(music_game_capture(true) == ESP_OK);
+    pending = 0;
+    mic_fail = true;
+    assert(capture_meow(queued.capture_session) == ESP_FAIL && music_game_voice().failed);
+    assert(music_game_capture(false) == ESP_OK);
     assert(music_completion_enabled()); // 旧设备没有设置记录时默认有提示音。
     music_completion_chime();
     assert(pending && queued.volume == MUSIC_VOLUME_FOLLOW && queued.score.count == 3);

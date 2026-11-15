@@ -36,6 +36,6 @@ esp_err_t storage_usage(storage_usage_t *usage)
     usage->badge = content.badge ? (content.portrait ? BADGE_BYTES : LEGACY_BADGE_BYTES) : 0;
     photo_album_t album = photo_album_snapshot();
     for (unsigned i = 0; i < PHOTO_CAPACITY; ++i)
-        if (album.slots[i]) usage->photo += PHOTO_BYTES;
+        usage->photo += album.bytes[i];
     return ESP_OK;
 }

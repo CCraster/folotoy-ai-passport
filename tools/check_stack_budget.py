@@ -13,7 +13,8 @@ def main():
             frames[name] = max(frames.get(name, 0), int(size))
     # Wi-Fi 开关不应为音乐配置或整个扫描列表预留栈空间。
     budgets = {"app_main": 2304, "handle_button": 384, "save_editor": 128,
-               "open_editor": 192, "network_set_enabled": 256, "start_saved": 512}
+               "open_editor": 192, "network_set_enabled": 256, "start_saved": 512,
+               "photo_decoder_info": 128}
     for name, limit in budgets.items():
         if name not in frames:
             raise SystemExit(f"Missing stack report for {name}; run a full firmware build")

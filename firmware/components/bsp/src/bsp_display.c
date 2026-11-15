@@ -107,7 +107,8 @@ static esp_err_t backlight_init(void) {
         .timer_num       = BSP_BL_LEDC_TIMER,
         .duty_resolution = BSP_BL_LEDC_RES,
         .freq_hz         = BSP_BL_LEDC_FREQ_HZ,
-        .clk_cfg         = LEDC_AUTO_CLK,
+        // AUTO 在 C3 上优先选 APB。背光用独立晶振，避免省电调频影响 PWM。
+        .clk_cfg         = LEDC_USE_XTAL_CLK,
     };
     esp_err_t e = ledc_timer_config(&t);
     if (e != ESP_OK) { ESP_LOGE(TAG, "ledc_timer_config 失败: %s", esp_err_to_name(e)); return e; }
@@ -234,8 +235,8 @@ esp_lcd_panel_io_handle_t bsp_display_io(void) { return s_io; }
 void bsp_display_backlight(uint8_t percent) {
     if (!s_bl_ready) return;
     if (percent > 100) percent = 100;
-    uint32_t max_duty = (1u << BSP_BL_LEDC_RES) - 1u;
-    uint32_t duty = (max_duty * percent) / 100u;
+    // 本板 10 位定时器低于 C3 的硬件上限，100% 时可输出持续高电平。
+    uint32_t duty = ((1u << BSP_BL_LEDC_RES) * percent) / 100u;
     ledc_set_duty(BSP_BL_LEDC_MODE, BSP_BL_LEDC_CHANNEL, duty);
     ledc_update_duty(BSP_BL_LEDC_MODE, BSP_BL_LEDC_CHANNEL);
 }

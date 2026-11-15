@@ -14,7 +14,8 @@
 #define AVATAR_HEIGHT 176
 #define LEGACY_AVATAR_SIZE 80
 #define PHOTO_BYTES (WIDTH * HEIGHT * 2)
-#define PHOTO_CAPACITY 3
+#define PHOTO_CAPACITY 6
+#define PHOTO_JPEG_LIMIT (80 * 1024)
 #define BADGE_PIXELS (WIDTH * (HEIGHT - HEADER_HEIGHT) * 2)
 #define BADGE_BYTES (BADGE_PIXELS + AVATAR_WIDTH * AVATAR_HEIGHT * 2)
 #define LEGACY_BADGE_BYTES (BADGE_PIXELS + LEGACY_AVATAR_SIZE * LEGACY_AVATAR_SIZE * 2)
@@ -32,6 +33,7 @@ typedef struct {
 typedef struct {
     uint8_t slots[PHOTO_CAPACITY];
     uint8_t selected;
+    uint32_t bytes[PHOTO_CAPACITY];
 } photo_album_t;
 
 typedef struct {
@@ -48,7 +50,7 @@ typedef struct {
 
 enum { POWER_DESKTOP, POWER_PORTABLE };
 // 这些值参与页面记忆。显示顺序独立于存储编号。
-enum { BADGE, PHOTO, QUOTA, SETTINGS, CITY };
+enum { BADGE, PHOTO, QUOTA, SETTINGS, CITY, GAME };
 typedef enum { PIXEL_STREET, PIXEL_PARK, PIXEL_HARBOR, PIXEL_SCENE_COUNT } pixel_scene_t;
 enum { PREF_PAGE = 1, PREF_BRIGHTNESS = 2, PREF_VOLUME = 4, PREF_SLEEP = 8, PREF_POWER = 16, PREF_DEEP_SLEEP = 32,
        PREF_SCENE = 64, PREF_QUOTA_VIEW = 128,
@@ -112,6 +114,10 @@ extern passport_profile_t profile;
 
 esp_err_t storage_init(void);
 passport_preferences_t preferences_snapshot(void);
+uint32_t load_meow_best(void);
+esp_err_t save_meow_best(uint32_t meters);
+bool load_meow_tutorial(void);
+esp_err_t save_meow_tutorial(void);
 esp_err_t update_preferences(unsigned mask, const passport_preferences_t *value);
 bool preferences_merge(passport_preferences_t *out, const passport_preferences_t *current,
                        const passport_preferences_t *value, unsigned mask);
@@ -130,6 +136,7 @@ esp_err_t select_photo(unsigned index);
 esp_err_t remove_photo(unsigned index);
 esp_err_t receive_photo(httpd_req_t *req, unsigned index, uint32_t checksum);
 const uint8_t *asset_data(bool photo, uint8_t slot);
+size_t photo_asset_size(uint8_t slot);
 bool detach_display_asset(const uint8_t *pixels);
 esp_err_t remove_badge(void);
 esp_err_t receive_badge(httpd_req_t *req, uint32_t checksum,

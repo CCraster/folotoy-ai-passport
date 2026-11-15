@@ -9,8 +9,11 @@ test:
 	.agent/local/tests/quota
 	$(CC) -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -Wno-unused-parameter -fsanitize=address,undefined \
 		-I tests/stubs -I firmware/main -I firmware/components/bsp/include \
-		tests/test_music.c firmware/main/rtttl.c -lm -o .agent/local/tests/music
+		tests/test_music.c firmware/main/rtttl.c firmware/main/meow_delivery.c -lm -o .agent/local/tests/music
 	.agent/local/tests/music
+	$(CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+		-I firmware/main tests/test_meow_delivery.c firmware/main/meow_delivery.c -o .agent/local/tests/meow
+	.agent/local/tests/meow
 	$(CC) -std=c11 -D_DARWIN_C_SOURCE -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -Wno-unused-parameter -fsanitize=address,undefined \
 		-I tests/stubs -I firmware/main tests/test_storage.c firmware/main/preferences.c -o .agent/local/tests/storage
 	.agent/local/tests/storage

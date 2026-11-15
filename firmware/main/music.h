@@ -2,6 +2,7 @@
 
 #include "esp_err.h"
 #include "rtttl.h"
+#include "meow_delivery.h"
 
 #define MUSIC_PRESET_COUNT 3
 #define MUSIC_CUSTOM MUSIC_PRESET_COUNT
@@ -43,3 +44,7 @@ uint8_t music_volume(void);
 void music_volume_sample(void);
 // 终端操作：等待播放退出并关闭 I2S，之后必须深睡或重启。
 esp_err_t music_prepare_deep_sleep(void);
+
+// 切换游戏麦克风会话；主线程只能读有声事件，PCM 留在音频任务。
+esp_err_t music_game_capture(bool active);
+meow_voice_t music_game_voice(void);

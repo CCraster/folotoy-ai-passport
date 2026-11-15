@@ -40,7 +40,8 @@ esp_err_t bsp_audio_wake(void);
 
 // 播放 / 录音。bytes 为字节数(16bit 单声道时 = 采样数 x 2)。
 esp_err_t bsp_audio_write(const void *pcm, size_t bytes);
-esp_err_t bsp_audio_read(void *pcm, size_t bytes);
+// 与播放器串行使用。超时或不足一帧均返回错误。
+esp_err_t bsp_audio_read(void *pcm, size_t bytes, uint32_t timeout_ms);
 
 // 输出音量 0..100(%)。
 void bsp_audio_set_volume(uint8_t percent);
