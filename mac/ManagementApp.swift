@@ -407,6 +407,25 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
 }
 
 @main struct PassportMain {
+    private static func mainMenu() -> NSMenu {
+        let menu = NSMenu()
+        let applicationItem = NSMenuItem()
+        applicationItem.submenu = NSMenu(title: "Passport Sync")
+        applicationItem.submenu?.addItem(withTitle: "退出 Passport Sync", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(applicationItem)
+
+        // AppKit dispatches editing shortcuts through the menu to the first responder, including modal fields.
+        let edit = NSMenu(title: "编辑")
+        edit.addItem(withTitle: "剪切", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "复制", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let editItem = NSMenuItem()
+        editItem.submenu = edit
+        menu.addItem(editItem)
+        return menu
+    }
+
     static func main() throws {
         let args = CommandLine.arguments
         if args.contains("--self-test") { try testQuotaData(); return }
@@ -438,7 +457,7 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
             return
         }
         let app = NSApplication.shared; let delegate = ManagementApp()
-        app.setActivationPolicy(.accessory); app.delegate = delegate
+        app.setActivationPolicy(.accessory); app.mainMenu = mainMenu(); app.delegate = delegate
         withExtendedLifetime(delegate) { app.run() }
     }
 }
