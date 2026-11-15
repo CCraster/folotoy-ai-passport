@@ -2,13 +2,15 @@
 
 把 AI Passport 变成随身身份卡、全屏相册和像素小城。搭配 Passport Sync，可在卡片上查看 Codex 剩余额度、重置卡和任务进度，并在任务完成时收到提示。
 
+<img src="docs/screenshots/01-cover.png" width="320" alt="Passport 口袋伙伴封面，展示像素街角和 Codex 大字版">
+
 ## 功能
 
 ### 身份卡
 
 在手机或电脑的设置网页里编辑头像和三段文字，分别填写名字、副标题和介绍。三段文字用不同字号和颜色。选头像时可拖动位置和缩放，确认裁剪后保存到卡片，离线也能展示。
 
-<img src="docs/screenshots/badge-navigation.png" width="160" alt="身份卡首次打开画面">
+<img src="docs/screenshots/02-identity.png" width="420" alt="身份卡上的像素猫头像、名字、副标题和简介">
 
 ### 全屏相册
 
@@ -16,26 +18,27 @@
 
 在卡片照片页短按确认，循环切换已保存的照片。换图时会短暂显示序号，随后回到纯照片的全屏画面。已保存的照片可离线查看，重启后会回到上次选中的那张。
 
+<img src="docs/screenshots/03-photos.png" width="420" alt="短按确认依次切换三张全屏照片，序号从 1 / 3 到 3 / 3">
+
 ### Codex 额度 · 两种布局
 
 用 Passport Sync 和卡片蓝牙配对后，在 Codex 页**短按确认**切换布局。卡片会记住上次选中的布局。
 
 | 详情版 | 大字版 |
 | --- | --- |
-| <img src="docs/screenshots/quota-detail.png" width="190" alt="Codex 额度详情版，以示例数据展示"> | <img src="docs/screenshots/quota-focus-single.png" width="190" alt="Codex 单额度周期的大字版，以示例数据展示"> |
 | 查看各周期额度、进度条和重置时间，以及重置卡数量和最近到期时间。 | 放大剩余百分比，仍显示额度周期、重置时间、状态栏及底部导航。只有一个额度周期时用大号数字，两个周期时上下排列。 |
+
+<img src="docs/screenshots/04-codex.png" width="420" alt="以同一组示例额度对比 Codex 详情版和大字版">
 
 卡片会显示进行中的任务数，也能在任务完成时提示。可在「显示与声音 → 任务完成提示音」开关声音、试听，并选择跟随系统音量或单独调整。
 
 ### 像素动画 · 三个场景
 
-| 像素街角 | 林间公园 | 灯塔海湾 |
-| --- | --- | --- |
-| <img src="docs/screenshots/city-day.png" width="170" alt="像素街角"> | <img src="docs/screenshots/park-day.png" width="170" alt="林间公园"> | <img src="docs/screenshots/harbor-day.png" width="170" alt="灯塔海湾"> |
+<img src="docs/screenshots/05-scenes.png" width="420" alt="三个像素动画场景，像素街角、林间公园和灯塔海湾">
 
-动画页**短按确认**依次切换三个场景。切换时，场景名会在右侧竖排显示约两秒。动画铺满屏幕，顶部叠加时间、连接状态和电量。校时后，背景会随本地时间切换白天、黄昏和夜晚。重启后仍会使用上次选中的场景。
+动画页**短按确认**依次切换像素街角、林间公园和灯塔海湾。切换时，场景名会在右侧竖排显示约两秒。动画铺满屏幕，顶部叠加时间、连接状态和电量。校时后，背景会随本地时间切换白天、黄昏和夜晚。重启后仍会使用上次选中的场景。
 
-以上图片由发布版固件界面渲染，时间、电量和额度为示例。
+以上画面由 v1.1.5 固件界面渲染，头像是像素插画，照片和状态数据为示例。
 
 ### 开机音乐与资料备份
 
