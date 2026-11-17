@@ -12,6 +12,22 @@ EVENTS = re.compile(rb'"(?:task_started|task_complete|turn_aborted)"')
 LIMIT = 8 * 1024 * 1024
 
 
+def is_subagent_session(row):
+    try:
+        meta = json.loads(row)
+    except (ValueError, UnicodeError):
+        return None
+    if not isinstance(meta, dict) or meta.get("type") != "session_meta":
+        return None
+    payload = meta.get("payload")
+    source = payload.get("source") if isinstance(payload, dict) else None
+    if isinstance(source, str):
+        return source == "subagent"
+    if isinstance(source, dict) and "subagent" in source:
+        return True
+    return None
+
+
 def task_snapshot(root, now):
     # 与 Mac 的日志范围一致。每次查询独立，SSH 断开无须维护远端进程。
     def candidates():
@@ -35,11 +51,15 @@ def task_snapshot(root, now):
         active = set()
         try:
             with path.open("rb") as stream:
+                is_subagent = is_subagent_session(stream.readline(LIMIT))
+                if is_subagent is True:
+                    continue
                 start = max(0, os.fstat(stream.fileno()).st_size - LIMIT)
                 if start:
                     stream.seek(start - 1)
                     at_boundary = stream.read(1) == b"\n"
                 else:
+                    stream.seek(0)
                     at_boundary = True
                 rows = stream.read(LIMIT).split(b"\n")
         except FileNotFoundError:
@@ -57,7 +77,10 @@ def task_snapshot(root, now):
             if not isinstance(record, dict):
                 continue
             kind, turn = record.get("type"), record.get("turn_id")
-            if not isinstance(turn, str) or not turn or record.get("root_turn_id") not in (None, turn):
+            if not isinstance(turn, str) or not turn:
+                continue
+            # Legacy logs without session metadata still use the root turn as a fallback.
+            if is_subagent is None and record.get("root_turn_id") not in (None, turn):
                 continue
             if kind == "task_started":
                 active.add(turn)

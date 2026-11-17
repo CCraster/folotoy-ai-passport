@@ -3,10 +3,12 @@
 #include "esp_jpeg_dec.h"
 #include "esp_jpeg_enc.h"
 #include "esp_log.h"
+#include "bsp_display.h"
+#include "esp_lcd_panel_io.h"
 #include "lvgl.h"
 #include "src/draw/lv_image_decoder_private.h"
 
-enum { ROW_BYTES = WIDTH * 2, MAX_STRIP_BYTES = ROW_BYTES * 16 };
+enum { ROW_BYTES = WIDTH * 2, MAX_STRIP_BYTES = ROW_BYTES * 16, JPEG_ALIGNMENT = 16 };
 
 typedef struct {
     jpeg_dec_handle_t codec;
@@ -14,57 +16,95 @@ typedef struct {
     int capacity;
     int first_row;
     int next_row;
+    bool owns_buffer;
 } photo_stream_t;
 
 static void close_stream(photo_stream_t *stream)
 {
     if (stream->codec) jpeg_dec_close(stream->codec);
-    if (stream->io.outbuf) jpeg_free_align(stream->io.outbuf);
+    if (stream->owns_buffer) jpeg_free_align(stream->io.outbuf);
     *stream = (photo_stream_t){0};
 }
 
-static bool open_stream(photo_stream_t *stream, const uint8_t *data, size_t size)
+static esp_err_t jpeg_status(jpeg_error_t result)
+{
+    if (result == JPEG_ERR_OK) return ESP_OK;
+    return result == JPEG_ERR_NO_MEM ? ESP_ERR_NO_MEM : ESP_ERR_INVALID_ARG;
+}
+
+static esp_err_t open_stream(photo_stream_t *stream, const uint8_t *data, size_t size, uint8_t *workspace)
 {
     if (size < 24 || size > PHOTO_JPEG_LIMIT || data[0] != 0xff || data[1] != 0xd8 ||
-        data[size - 2] != 0xff || data[size - 1] != 0xd9) return false;
+        data[size - 2] != 0xff || data[size - 1] != 0xd9) return ESP_ERR_INVALID_ARG;
 
     jpeg_dec_config_t config = DEFAULT_JPEG_DEC_CONFIG();
     config.output_type = JPEG_PIXEL_FORMAT_RGB565_LE;
     config.block_enable = true;
-    if (jpeg_dec_open(&config, &stream->codec) != JPEG_ERR_OK) return false;
+    esp_err_t err = jpeg_status(jpeg_dec_open(&config, &stream->codec));
+    if (err != ESP_OK) return err;
 
     stream->io.inbuf = (uint8_t *)data; // SDK uses a mutable pointer for its read-only input.
     stream->io.inbuf_len = size;
     jpeg_dec_header_info_t info;
-    if (jpeg_dec_parse_header(stream->codec, &stream->io, &info) == JPEG_ERR_OK &&
-        info.width == WIDTH && info.height == HEIGHT &&
-        jpeg_dec_get_outbuf_len(stream->codec, &stream->capacity) == JPEG_ERR_OK &&
-        stream->capacity > 0 && stream->capacity <= MAX_STRIP_BYTES) {
-        stream->io.outbuf = jpeg_calloc_align(stream->capacity, 16);
-        if (stream->io.outbuf) return true;
+    err = jpeg_status(jpeg_dec_parse_header(stream->codec, &stream->io, &info));
+    if (err == ESP_OK && (info.width != WIDTH || info.height != HEIGHT)) err = ESP_ERR_INVALID_ARG;
+    if (err == ESP_OK) err = jpeg_status(jpeg_dec_get_outbuf_len(stream->codec, &stream->capacity));
+    if (err == ESP_OK && (stream->capacity <= 0 || stream->capacity > MAX_STRIP_BYTES))
+        err = ESP_ERR_INVALID_ARG;
+    if (err == ESP_OK) {
+        stream->io.outbuf = workspace;
+        if (!workspace) {
+            stream->io.outbuf = jpeg_calloc_align(stream->capacity, JPEG_ALIGNMENT);
+            stream->owns_buffer = stream->io.outbuf != NULL;
+        }
+        if (stream->io.outbuf) return ESP_OK;
+        err = ESP_ERR_NO_MEM;
     }
     close_stream(stream);
-    return false;
+    return err;
 }
 
-static bool decode_strip(photo_stream_t *stream)
+static esp_err_t decode_strip(photo_stream_t *stream)
 {
-    if (jpeg_dec_process(stream->codec, &stream->io) != JPEG_ERR_OK) return false;
+    const esp_err_t err = jpeg_status(jpeg_dec_process(stream->codec, &stream->io));
+    if (err != ESP_OK) return err;
     const int bytes = stream->io.out_size;
-    if (bytes <= 0 || bytes > stream->capacity || bytes % ROW_BYTES) return false;
+    if (bytes <= 0 || bytes > stream->capacity || bytes % ROW_BYTES) return ESP_ERR_INVALID_ARG;
     stream->first_row = stream->next_row;
     stream->next_row += bytes / ROW_BYTES;
-    return stream->next_row <= HEIGHT;
+    return stream->next_row <= HEIGHT ? ESP_OK : ESP_ERR_INVALID_ARG;
 }
 
-bool photo_jpeg_valid(const uint8_t *data, size_t size)
+static esp_err_t validate_photo(const uint8_t *data, size_t size, uint8_t *workspace)
 {
     photo_stream_t stream = {0};
-    if (!open_stream(&stream, data, size)) return false;
-    while (stream.next_row < HEIGHT && decode_strip(&stream)) {}
-    const bool complete = stream.next_row == HEIGHT;
+    esp_err_t err = open_stream(&stream, data, size, workspace);
+    if (err != ESP_OK) return err;
+    while (err == ESP_OK && stream.next_row < HEIGHT) err = decode_strip(&stream);
     close_stream(&stream);
-    return complete;
+    return err;
+}
+
+esp_err_t photo_jpeg_validate_upload(const uint8_t *data, size_t size)
+{
+    if (!bsp_lvgl_lock(200)) return ESP_ERR_TIMEOUT;
+    lv_display_t *display = lv_display_get_default();
+    lv_draw_buf_t *draw = display ? lv_display_get_buf_active(display) : NULL;
+    const uintptr_t start = draw ? (uintptr_t)draw->data : 0;
+    const uintptr_t aligned = (start + JPEG_ALIGNMENT - 1) & ~(uintptr_t)(JPEG_ALIGNMENT - 1);
+    esp_err_t err = ESP_ERR_INVALID_STATE;
+    if (start && lv_display_get_render_mode(display) == LV_DISPLAY_RENDER_MODE_PARTIAL &&
+        draw->data_size >= MAX_STRIP_BYTES + aligned - start) {
+        // Hold the LVGL lock and drain pending SPI DMA before lending its partial draw buffer.
+        // The next refresh redraws into this buffer before any transfer.
+        err = esp_lcd_panel_io_tx_param(bsp_display_io(), -1, NULL, 0);
+        if (err == ESP_OK) {
+            err = validate_photo(data, size, (uint8_t *)aligned);
+            ESP_LOGI("photo_diag", "jpeg validation workspace=display result=%s", esp_err_to_name(err));
+        }
+    }
+    bsp_lvgl_unlock();
+    return err;
 }
 
 size_t photo_jpeg_from_rgb565(const uint8_t *pixels, uint8_t *jpeg)
@@ -79,7 +119,7 @@ size_t photo_jpeg_from_rgb565(const uint8_t *pixels, uint8_t *jpeg)
     int size = 0;
     jpeg_error_t result = jpeg_enc_process(encoder, pixels, PHOTO_BYTES, jpeg, PHOTO_JPEG_LIMIT, &size);
     jpeg_enc_close(encoder);
-    return result == JPEG_ERR_OK && size > 0 && photo_jpeg_valid(jpeg, size) ? size : 0;
+    return result == JPEG_ERR_OK && size > 0 && validate_photo(jpeg, size, NULL) == ESP_OK ? size : 0;
 }
 
 // LVGL uses one software draw unit. It opens each tile separately, so keep the
@@ -123,14 +163,14 @@ static lv_result_t photo_decoder_area(lv_image_decoder_t *decoder, lv_image_deco
     if (row < 0 || row >= HEIGHT || row > requested->y2) return LV_RESULT_INVALID;
     if (frame_source != image->data || row < frame.first_row) {
         photo_jpeg_finish_frame();
-        if (!open_stream(&frame, image->data, image->data_size)) {
+        if (open_stream(&frame, image->data, image->data_size, NULL) != ESP_OK) {
             ESP_LOGW("photo", "Cannot open JPEG for display");
             return LV_RESULT_INVALID;
         }
         frame_source = image->data;
     }
     while (row >= frame.next_row) {
-        if (!decode_strip(&frame)) {
+        if (decode_strip(&frame) != ESP_OK) {
             photo_jpeg_finish_frame();
             ESP_LOGW("photo", "JPEG display decode failed");
             return LV_RESULT_INVALID;

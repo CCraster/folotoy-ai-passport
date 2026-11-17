@@ -1,6 +1,7 @@
 // Rebuild the flash artwork with: node tools/pixel_city_art.mjs
 // Coordinates below use the 240x248 street in the approved preview.
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
 
 const width = 240, height = 320, top = 40;
 const state = { mode: 'day' };
@@ -114,10 +115,8 @@ for (const [i, lighting] of ['day', 'dusk', 'night'].entries()) {
     output.writeUInt16LE((r>>3)<<11 | (g>>2)<<5 | b>>3, (i*width*height+pixel)*2);
   }
 }
-writeFileSync(new URL('../firmware/main/art/pixel_city.rgb565', import.meta.url), output);
 
-// Additional scenes use a 2x pixel grid. The screen can draw them straight from
-// flash at their display size without keeping a full-size copy in RAM.
+// The park and harbor use a 2x pixel grid.
 function landscape(p) {
   rect(0, -top, 240, height, p.sky);
   rect(0, 44, 240, 57, p.horizon);
@@ -218,4 +217,75 @@ for (const draw of [park, harbor]) {
     }
   }
 }
-writeFileSync(new URL('../firmware/main/art/pixel_scenes.rgb565', import.meta.url), small);
+// Each image begins with 320 little-endian row offsets. A row is a sequence
+// of (length, RGB565) runs, or a zero marker followed by raw pixels.
+function encodeScene(source, inputWidth) {
+  const rowBytes = width * 2;
+  const index = Buffer.alloc(height * 2);
+  const rows = [];
+  const known = new Map();
+  const expanded = Buffer.alloc(width * height * 2);
+  const scale = width / inputWidth;
+  let offset = index.length;
+  for (let y = 0; y < height; y++) {
+    const row = expanded.subarray(y * rowBytes, (y + 1) * rowBytes);
+    for (let x = 0; x < width; x++) {
+      const at = Math.floor(y / scale) * inputWidth + Math.floor(x / scale);
+      row.writeUInt16LE(source.readUInt16LE(at * 2), x * 2);
+    }
+    const key = row.toString('base64');
+    if (!known.has(key)) {
+      const runs = [];
+      for (let x = 0; x < width;) {
+        const color = row.readUInt16LE(x * 2);
+        let count = 1;
+        while (x + count < width && row.readUInt16LE((x + count) * 2) === color) count++;
+        runs.push(count, color & 255, color >> 8);
+        x += count;
+      }
+      const encoded = runs.length <= rowBytes ? Buffer.from(runs) : Buffer.concat([Buffer.from([0]), row]);
+      known.set(key, offset);
+      rows.push(encoded);
+      offset += encoded.length;
+    }
+    index.writeUInt16LE(known.get(key), y * 2);
+  }
+  const image = Buffer.concat([index, ...rows]);
+  // Check every pixel, including the 2x expansion previously done by LVGL.
+  for (let y = 0; y < height; y++) {
+    let pos = image.readUInt16LE(y * 2);
+    const expected = expanded.subarray(y * rowBytes, (y + 1) * rowBytes);
+    if (!image[pos]) {
+      assert.deepEqual(image.subarray(pos + 1, pos + 1 + rowBytes), expected);
+      continue;
+    }
+    for (let x = 0; x < width;) {
+      const count = image[pos];
+      assert(count > 0 && x + count <= width);
+      const color = image.readUInt16LE(pos + 1);
+      for (let i = 0; i < count; i++) assert.equal(expected.readUInt16LE((x + i) * 2), color);
+      x += count;
+      pos += 3;
+    }
+  }
+  return image;
+}
+
+const images = [];
+for (const [source, inputWidth] of [[output, width], [small, width / 2]]) {
+  const imageBytes = inputWidth * (height * inputWidth / width) * 2;
+  for (let start = 0; start < source.length; start += imageBytes)
+    images.push(encodeScene(source.subarray(start, start + imageBytes), inputWidth));
+}
+const directory = Buffer.alloc((images.length + 1) * 4);
+let start = directory.length;
+for (const [i, image] of images.entries()) {
+  directory.writeUInt32LE(start, i * 4);
+  start += image.length;
+}
+directory.writeUInt32LE(start, images.length * 4);
+const asset = Buffer.concat([directory, ...images]);
+const path = new URL('../firmware/main/art/pixel_city.rle', import.meta.url);
+if (process.argv.includes('--check')) assert.deepEqual(readFileSync(path), asset);
+else writeFileSync(path, asset);
+console.log(`Pixel city: ${images.length} lossless backgrounds, ${asset.length} bytes.`);

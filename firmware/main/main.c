@@ -32,13 +32,12 @@ LV_FONT_DECLARE(passport_quota)
 LV_FONT_DECLARE(passport_game)
 
 static const uint8_t display_pages[] = {BADGE, PHOTO, QUOTA, CITY, GAME};
-enum { WEB_SETUP, PAIR, BRIGHTNESS, VOLUME, BOOT_MUSIC, SLEEP, POWER_MODE, FORGET_MAC, RESET, WIFI_POWER, BLE_POWER, MUSIC_ENABLED_SETTING, MUSIC_SELECTION_SETTING, DEEP_SLEEP_SETTING, ABOUT, TASK_CHIME, TASK_CHIME_ENABLE, TASK_CHIME_VOLUME };
+enum { WEB_SETUP, PAIR, BRIGHTNESS, VOLUME, BOOT_MUSIC, SLEEP, POWER_MODE, FORGET_MAC, RESET, WIFI_POWER, BLE_POWER, MUSIC_ENABLED_SETTING, MUSIC_SELECTION_SETTING, DEEP_SLEEP_SETTING, ABOUT, TASK_CHIME, TASK_CHIME_ENABLE, TASK_CHIME_VOLUME, LANGUAGE };
 enum { MUSIC_ENABLE, MUSIC_MELODY, MUSIC_PREVIEW, MUSIC_MENU_COUNT };
 enum { CHIME_ENABLE, CHIME_FOLLOW, CHIME_LEVEL, CHIME_PREVIEW, CHIME_MENU_COUNT };
 enum { SOUND_NONE, SOUND_BOOT, SOUND_CHIME };
 static const uint16_t sleep_options[] = {30, 60, 180, 300, 0};
 static const uint16_t deep_sleep_options[] = {300, 900, 1800};
-static const char *weekdays[] = {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
 static QueueHandle_t buttons;
 static lv_obj_t *root, *header, *clock_label, *weekday_label, *wifi_icon, *bluetooth_icon;
 static lv_obj_t *battery_label, *battery_icon;
@@ -63,12 +62,11 @@ static uint8_t displayed_badge, displayed_photo;
 static uint8_t settings_group, selection;
 static int settings_scroll_y;
 static const uint8_t settings_items[][5] = {
-    {WIFI_POWER, WEB_SETUP, PAIR},
+    {WEB_SETUP, WIFI_POWER, PAIR},
     {SLEEP, BRIGHTNESS, VOLUME, BOOT_MUSIC, TASK_CHIME},
-    {POWER_MODE, RESET, ABOUT},
+    {LANGUAGE, POWER_MODE, ABOUT, RESET},
 };
-static const uint8_t settings_counts[] = {3, 5, 3};
-static const char *settings_titles[] = {"连接", "显示与声音", "设备"};
+static const uint8_t settings_counts[] = {3, 5, 4};
 // 草稿只在确认保存时提交；进入或长按退出不会更改设备配置。
 static int editing = -1, edit_draft, edit_saved;
 static bool bluetooth_visible, power_visible, about_visible;
@@ -198,7 +196,7 @@ static void sun_icon(lv_obj_t *parent, int x, int y, int size, uint32_t ink)
 
 static void back_hint(void)
 {
-    centered(body, editing >= 0 ? "确认保存 · 长按取消" : web_visible ? "上下切换 · 长按确认返回" : "长按确认返回",
+    centered(body, editing >= 0 ? ui_text("确认保存 · 长按取消", "OK to save · Hold to cancel") : web_visible ? ui_text("上下切换 · 长按确认返回", "Up/Down · Hold OK to go back") : ui_text("长按确认返回", "Hold OK to go back"),
              261, &passport_caption, MUTED);
 }
 
@@ -233,6 +231,15 @@ static void poll_battery(int64_t now)
     next_read = now + (reading < 0 ? 3000000 : 15000000);
 }
 
+static const char *weekday_name(int day)
+{
+    static const char *const names[][7] = {
+        {"周日", "周一", "周二", "周三", "周四", "周五", "周六"},
+        {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"},
+    };
+    return names[passport_language()][day];
+}
+
 static void update_header(const web_status_t *web, time_t now)
 {
     char time_text[16] = "--:--", power[12] = "--%";
@@ -241,7 +248,7 @@ static void update_header(const web_status_t *web, time_t now)
         snprintf(time_text, sizeof time_text, "%02d:%02d", clock.tm_hour, clock.tm_min);
     if (battery >= 0) snprintf(power, sizeof power, "%d%%", battery);
     set_label(clock_label, time_text);
-    set_label(weekday_label, now >= 1700000000 ? weekdays[clock.tm_wday] : "--");
+    set_label(weekday_label, now >= 1700000000 ? weekday_name(clock.tm_wday) : "--");
     static uint32_t wifi_color, bt_color;
     uint32_t network = web->hotspot ? 0xffd795 : web->wifi_connected ? ACCENT : INACTIVE;
     uint32_t bluetooth = quota_connected() ? ACCENT : INACTIVE;
@@ -433,9 +440,9 @@ static void empty_state(void)
 {
     rounded_box(body, 16, 16, AVATAR_WIDTH, AVATAR_HEIGHT, SURFACE, 10);
     person_placeholder(body);
-    lv_obj_t *heading = label(body, "身份卡", 142, 16, &passport_heading, TEXT);
+    lv_obj_t *heading = label(body, ui_text("身份卡", "ID Card"), 142, 16, &passport_heading, TEXT);
     lv_obj_set_width(heading, 82);
-    lv_obj_t *hint = label(body, "添加资料", 142, 54, &passport_caption, ACCENT);
+    lv_obj_t *hint = label(body, ui_text("添加资料", "Set up ID card"), 142, 54, &passport_caption, ACCENT);
     lv_obj_set_width(hint, 82);
 }
 
@@ -449,9 +456,9 @@ static uint32_t expiry_color(uint32_t expires_at, time_t now)
 
 static void format_quota_duration(lv_obj_t *duration, uint16_t minutes)
 {
-    if (minutes % 1440 == 0) lv_label_set_text_fmt(duration, "%u 天", minutes / 1440);
-    else if (minutes % 60 == 0) lv_label_set_text_fmt(duration, "%u 小时", minutes / 60);
-    else lv_label_set_text_fmt(duration, "%u 分钟", minutes);
+    if (minutes % 1440 == 0) lv_label_set_text_fmt(duration, ui_text("%u 天", "%u d"), minutes / 1440);
+    else if (minutes % 60 == 0) lv_label_set_text_fmt(duration, ui_text("%u 小时", "%u hr"), minutes / 60);
+    else lv_label_set_text_fmt(duration, ui_text("%u 分钟", "%u min"), minutes);
 }
 
 static bool quota_window_expired(uint32_t reset_at, time_t now)
@@ -462,11 +469,11 @@ static bool quota_window_expired(uint32_t reset_at, time_t now)
 static void format_quota_reset(lv_obj_t *text, uint32_t reset_at, time_t now)
 {
     if (quota_window_expired(reset_at, now)) {
-        lv_label_set_text(text, "等待刷新");
+        lv_label_set_text(text, ui_text("等待刷新", "Awaiting refresh"));
         return;
     }
     struct tm reset = local_clock(reset_at);
-    lv_label_set_text_fmt(text, "%02d/%02d %02d:%02d 重置", reset.tm_mon + 1,
+    lv_label_set_text_fmt(text, ui_text("%02d/%02d %02d:%02d 重置", "Resets %02d/%02d %02d:%02d"), reset.tm_mon + 1,
                          reset.tm_mday, reset.tm_hour, reset.tm_min);
 }
 
@@ -478,9 +485,9 @@ static bool quota_fresh(uint32_t updated_at, time_t now, sync_status_t status)
 
 static const char *quota_sync_hint(sync_status_t status)
 {
-    if (!quota_ble_enabled()) return "蓝牙已关闭";
-    if (!quota_connected()) return "未连接";
-    return status.quota_failed ? "同步失败" : "等待同步";
+    if (!quota_ble_enabled()) return ui_text("蓝牙已关闭", "Bluetooth off");
+    if (!quota_connected()) return ui_text("未连接", "Disconnected");
+    return status.quota_failed ? ui_text("同步失败", "Sync failed") : ui_text("等待同步", "Waiting for sync");
 }
 
 static void render_quota_sync(uint32_t updated_at, time_t now, sync_status_t status)
@@ -490,7 +497,7 @@ static void render_quota_sync(uint32_t updated_at, time_t now, sync_status_t sta
     struct tm updated = local_clock(updated_at);
     label(body, fresh ? LV_SYMBOL_OK : LV_SYMBOL_LOOP, 18, 222, &lv_font_montserrat_14, fresh ? ACCENT : LOW);
     lv_obj_t *sync = label(body, "", 40, 220, &passport_caption, MUTED);
-    lv_label_set_text_fmt(sync, "%s · %02d:%02d", fresh ? "更新于" : quota_sync_hint(status),
+    lv_label_set_text_fmt(sync, "%s · %02d:%02d", fresh ? ui_text("更新于", "Updated") : quota_sync_hint(status),
                          updated.tm_hour, updated.tm_min);
 }
 
@@ -544,7 +551,7 @@ static void render_quota_focus(quota_snapshot_t value, size_t count, time_t now,
         rounded_box(card, 14, bar_y, 180, 4, TRACK, 2);
         if (window.remaining)
             rounded_box(card, 14, bar_y, (window.remaining * 180 + 99) / 100, 4, ink, 2);
-        lv_obj_t *reset = label(card, "重置时间待同步", single ? 0 : 14, single ? 135 : 62, &passport_caption, MUTED);
+        lv_obj_t *reset = label(card, ui_text("重置时间待同步", "Reset time pending"), single ? 0 : 14, single ? 135 : 62, &passport_caption, MUTED);
         if (window.reset_at) format_quota_reset(reset, window.reset_at, now);
         if (single) {
             lv_obj_set_width(duration, 208);
@@ -560,11 +567,11 @@ static void render_quota(quota_snapshot_t value, time_t now)
 {
     label(body, "Codex", 16, 3, &lv_font_montserrat_28, TEXT);
     sync_status_t status = quota_sync_status(NULL);
-    lv_obj_t *subtitle = label(body, "剩余额度", 128, 12, &passport_caption, MUTED);
+    lv_obj_t *subtitle = label(body, ui_text("剩余额度", "Quota left"), 128, 12, &passport_caption, MUTED);
     lv_obj_set_width(subtitle, 96);
     lv_obj_set_style_text_align(subtitle, LV_TEXT_ALIGN_RIGHT, 0);
     if (quota_connected() && status.tasks_known && status.active) {
-        lv_label_set_text_fmt(subtitle, "进行中 %u", (unsigned)status.active);
+        lv_label_set_text_fmt(subtitle, ui_text("进行中 %u", "Active %u"), (unsigned)status.active);
         lv_obj_set_style_text_color(subtitle, color(ACCENT), 0);
     }
     size_t count = (value.windows[0].minutes > 0) + (value.windows[1].minutes > 0);
@@ -609,25 +616,25 @@ static void render_quota(quota_snapshot_t value, time_t now)
         rounded_box(body, 16, 44, 208, 116, SURFACE, 12);
         centered(body, LV_SYMBOL_BLUETOOTH, 61, &lv_font_montserrat_28, ACCENT);
         centered(body, quota_sync_hint(status), 104, &passport_font, TEXT);
-        centered(body, quota_connected() ? "到 Mac 查看同步状态" :
-                 quota_ble_enabled() ? "设置中连接 Mac" : "设置中开启蓝牙", 134, &passport_caption, MUTED);
+        centered(body, quota_connected() ? ui_text("请打开 Passport Sync", "Open Passport Sync") :
+                 quota_ble_enabled() ? ui_text("在设置中开始蓝牙配对", "Pair in Settings") : ui_text("设置中开启蓝牙", "Enable Bluetooth in Settings"), 134, &passport_caption, MUTED);
     }
     reset_snapshot_t resets = quota_resets();
     bool reset_fresh = quota_connected() && resets.updated_at && now - resets.updated_at < 180;
     rounded_box(body, 16, 170, 208, 47, SURFACE, 12);
-    label(body, "重置卡", 28, 176, &passport_font, TEXT);
+    label(body, ui_text("重置卡", "Reset cards"), 28, 176, &passport_font, TEXT);
     lv_obj_t *cards = label(body, "", 148, 174, &lv_font_montserrat_20, reset_fresh ? ACCENT : MUTED);
     lv_obj_set_width(cards, 62); lv_obj_set_style_text_align(cards, LV_TEXT_ALIGN_RIGHT, 0);
     if (resets.known) lv_label_set_text_fmt(cards, "%u", resets.count);
     else lv_label_set_text(cards, "--");
     lv_obj_t *expiry = label(body, "", 28, 199, &passport_caption, expiry_color(resets.expires_at, now));
-    if (!resets.known) lv_label_set_text(expiry, "有效期待同步");
-    else if (!resets.count) lv_label_set_text(expiry, "暂无可用重置卡");
-    else if (!resets.expires_at) lv_label_set_text(expiry, "有效期未提供");
-    else if (now >= resets.expires_at) lv_label_set_text(expiry, "到期信息待刷新");
+    if (!resets.known) lv_label_set_text(expiry, ui_text("有效期待同步", "Expiry pending"));
+    else if (!resets.count) lv_label_set_text(expiry, ui_text("暂无可用重置卡", "No reset cards"));
+    else if (!resets.expires_at) lv_label_set_text(expiry, ui_text("有效期未提供", "Expiry unavailable"));
+    else if (now >= resets.expires_at) lv_label_set_text(expiry, ui_text("到期信息待刷新", "Expiry needs refresh"));
     else {
         struct tm date = local_clock(resets.expires_at);
-        lv_label_set_text_fmt(expiry, "%s %02d/%02d %02d:%02d 到期", resets.complete ? "最近" : "最近已知",
+        lv_label_set_text_fmt(expiry, ui_text("%s %02d/%02d %02d:%02d 到期", "%s %02d/%02d %02d:%02d"), resets.complete ? ui_text("最近", "Next") : ui_text("最近已知", "Last known"),
                              date.tm_mon + 1, date.tm_mday, date.tm_hour, date.tm_min);
     }
     page_icons();
@@ -635,46 +642,53 @@ static void render_quota(quota_snapshot_t value, time_t now)
 
 static void render_storage(void)
 {
-    label(body, "存储空间", 16, 3, &passport_heading, TEXT);
+    label(body, ui_text("存储空间", "Storage"), 16, 3, &passport_heading, TEXT);
     storage_usage_t value;
-    if (storage_usage(&value) != ESP_OK) { centered(body, "存储信息读取失败", 116, &passport_font, LOW); return; }
+    if (storage_usage(&value) != ESP_OK) { centered(body, ui_text("存储信息读取失败", "Unable to read storage"), 116, &passport_font, LOW); return; }
     lv_obj_t *total = label(body, "", 16, 42, &lv_font_montserrat_28, TEXT);
     lv_label_set_text_fmt(total, "%u MiB", (unsigned)(value.total / 1048576));
-    label(body, "硬件闪存", 150, 56, &passport_caption, MUTED);
-    uint32_t used = value.firmware + value.badge + value.photo;
-    rounded_box(body, 16, 83, 208, 7, TRACK, 3);
-    int system_width = (uint64_t)value.firmware * 208 / value.total;
-    int asset_width = (uint64_t)(value.badge + value.photo) * 208 / value.total;
-    if (system_width) box(body, 16, 83, system_width, 7, MUTED);
-    if (asset_width) box(body, 16 + system_width, 83, asset_width, 7, ACCENT);
-    const char *names[] = {"运行固件", "个人内容", "系统与预留"};
-    uint32_t sizes[] = {value.firmware, value.badge + value.photo, value.total - used};
-    for (size_t i = 0; i < 3; ++i) {
-        label(body, names[i], 20, 106 + i * 31, &passport_font, i == 1 ? ACCENT : MUTED);
-        lv_obj_t *amount = label(body, "", 125, 108 + i * 31, &lv_font_montserrat_14, TEXT);
-        lv_obj_set_width(amount, 94); lv_obj_set_style_text_align(amount, LV_TEXT_ALIGN_RIGHT, 0);
-        if (sizes[i] >= 1048576) lv_label_set_text_fmt(amount, "%u.%02u MiB", (unsigned)(sizes[i] / 1048576), (unsigned)((uint64_t)(sizes[i] % 1048576) * 100 / 1048576));
-        else lv_label_set_text_fmt(amount, "%u KiB", (unsigned)((sizes[i] + 1023) / 1024));
-    }
-    centered(body, "图片区 1 MiB · 最多 3 张", 213, &passport_caption, MUTED);
-    lv_obj_t *pictures = centered(body, "", 236, &passport_caption, MUTED);
-    lv_label_set_text_fmt(pictures, "身份卡 %uK · 照片 %uK", (unsigned)((value.badge + 1023) / 1024), (unsigned)((value.photo + 1023) / 1024));
+    label(body, ui_text("硬件闪存", "Flash memory"), 126, 56, &passport_caption, MUTED);
+    uint32_t firmware = (uint64_t)value.firmware * 100 / 1048576;
+    uint32_t capacity = (uint64_t)value.firmware_capacity * 100 / 1048576;
+    lv_obj_t *app = label(body, "", 16, 88, &passport_caption, TEXT);
+    lv_label_set_text_fmt(app, ui_text("固件 %u.%02u / %u.%02u MiB", "Firmware %u.%02u / %u.%02u MiB"),
+                          (unsigned)(firmware / 100), (unsigned)(firmware % 100),
+                          (unsigned)(capacity / 100), (unsigned)(capacity % 100));
+    rounded_box(body, 16, 110, 208, 6, TRACK, 3);
+    int app_width = (uint64_t)value.firmware * 208 / value.firmware_capacity;
+    if (app_width) rounded_box(body, 16, 110, app_width, 6, ACCENT, 3);
+    lv_obj_t *free = label(body, "", 16, 122, &passport_caption, MUTED);
+    lv_label_set_text_fmt(free, ui_text("固件余量 %u KiB", "%u KiB free"),
+                          (unsigned)((value.firmware_capacity - value.firmware) / 1024));
+
+    uint32_t pictures_used = value.badge + value.photo;
+    lv_obj_t *slots = label(body, "", 16, 159, &passport_caption, TEXT);
+    lv_label_set_text_fmt(slots, ui_text("图片 %u / %u KiB", "Images %u / %u KiB"),
+                          (unsigned)((pictures_used + 1023) / 1024), (unsigned)(value.assets_capacity / 1024));
+    rounded_box(body, 16, 181, 208, 6, TRACK, 3);
+    int image_width = (uint64_t)pictures_used * 208 / value.assets_capacity;
+    if (image_width) rounded_box(body, 16, 181, image_width, 6, ACCENT, 3);
+    lv_obj_t *pictures = label(body, "", 16, 199, &passport_caption, MUTED);
+    lv_obj_t *count = label(body, "", 16, 224, &passport_caption, MUTED);
+    lv_label_set_text_fmt(count, ui_text("最多 %u 张照片", "%u photo slots"), (unsigned)PHOTO_CAPACITY);
+    lv_label_set_text_fmt(pictures, ui_text("身份卡 %uK · 照片 %uK", "ID %uK · Photos %uK"), (unsigned)((value.badge + 1023) / 1024), (unsigned)((value.photo + 1023) / 1024));
 }
 
 static const char *edit_title(int setting)
 {
     switch (setting) {
-    case WIFI_POWER: return "日常 Wi-Fi";
-    case BLE_POWER: return "蓝牙";
-    case BRIGHTNESS: return "亮度";
-    case VOLUME: return "音量";
-    case TASK_CHIME_VOLUME: return "提示音量";
-    case SLEEP: return "息屏";
-    case POWER_MODE: return "使用模式";
-    case DEEP_SLEEP_SETTING: return "自动休眠";
-    case MUSIC_ENABLED_SETTING: return "开机播放";
-    case MUSIC_SELECTION_SETTING: return "旋律";
-    default: return "设置";
+    case WIFI_POWER: return ui_text("路由器 Wi-Fi", "Router Wi-Fi");
+    case BLE_POWER: return ui_text("蓝牙", "Bluetooth");
+    case BRIGHTNESS: return ui_text("屏幕亮度", "Brightness");
+    case VOLUME: return ui_text("音量", "Volume");
+    case TASK_CHIME_VOLUME: return ui_text("提示音量", "Alert volume");
+    case SLEEP: return ui_text("息屏时间", "Screen timeout");
+    case POWER_MODE: return ui_text("待机模式", "Standby mode");
+    case LANGUAGE: return ui_text("语言", "Language");
+    case DEEP_SLEEP_SETTING: return ui_text("自动深睡", "Auto deep sleep");
+    case MUSIC_ENABLED_SETTING: return ui_text("开机播放", "Play on startup");
+    case MUSIC_SELECTION_SETTING: return ui_text("旋律", "Melody");
+    default: return ui_text("设置", "Settings");
     }
 }
 
@@ -688,13 +702,14 @@ static int edit_count(int setting)
 
 static const char *edit_option(int setting, int value)
 {
-    static const char *sleep_names[] = {"30 秒", "1 分钟", "3 分钟", "5 分钟", "常亮"};
+    const char *sleep_names[] = {ui_text("30 秒", "30 seconds"), ui_text("1 分钟", "1 minute"), ui_text("3 分钟", "3 minutes"), ui_text("5 分钟", "5 minutes"), ui_text("不自动息屏", "Never")};
+    if (setting == LANGUAGE) return value == PASSPORT_EN ? "English" : "中文";
     if (setting == SLEEP) return sleep_names[value];
-    static const char *deep_names[] = {"5 分钟", "15 分钟", "30 分钟"};
+    const char *deep_names[] = {ui_text("5 分钟", "5 minutes"), ui_text("15 分钟", "15 minutes"), ui_text("30 分钟", "30 minutes")};
     if (setting == DEEP_SLEEP_SETTING) return deep_names[value];
-    if (setting == POWER_MODE) return value == POWER_DESKTOP ? "桌面常连" : "随身省电";
-    if (setting == MUSIC_SELECTION_SETTING) return value == MUSIC_CUSTOM ? "自定义" : music_presets[value].name;
-    return value ? "开启" : "关闭";
+    if (setting == POWER_MODE) return value == POWER_DESKTOP ? ui_text("桌面常连", "Desk mode") : ui_text("随身省电", "Portable mode");
+    if (setting == MUSIC_SELECTION_SETTING) return value == MUSIC_CUSTOM ? ui_text("自定义", "Custom") : music_preset_name(value);
+    return value ? ui_text("开启", "On") : ui_text("关闭", "Off");
 }
 
 static void render_editor(void)
@@ -713,8 +728,8 @@ static void render_editor(void)
         label(body, LV_SYMBOL_UP, 202, 190, &lv_font_montserrat_14, MUTED);
         lv_obj_t *saved = centered(body, "", 190, &passport_caption, MUTED);
         if (editing == TASK_CHIME_VOLUME && edit_saved == MUSIC_VOLUME_FOLLOW)
-            lv_label_set_text(saved, "当前随系统");
-        else lv_label_set_text_fmt(saved, "当前 %d%%", edit_saved);
+            lv_label_set_text(saved, ui_text("当前随系统", "Using system volume"));
+        else lv_label_set_text_fmt(saved, ui_text("当前 %d%%", "Current %d%%"), edit_saved);
     } else {
         int count = edit_count(editing), height = count > 4 ? 31 : count == 4 ? 39 : 43;
         int top = count == 2 ? 65 : 44;
@@ -726,8 +741,8 @@ static void render_editor(void)
                                        &lv_font_montserrat_14, ACCENT);
         }
         if (editing == POWER_MODE)
-            centered(body, edit_draft == POWER_DESKTOP ? "息屏后继续同步" : "休眠后暂停同步", 195, &passport_caption, MUTED);
-        if (editing == DEEP_SLEEP_SETTING) centered(body, "随身模式生效", 211, &passport_caption, MUTED);
+            centered(body, edit_draft == POWER_DESKTOP ? ui_text("息屏后继续同步", "Sync stays on with screen off") : ui_text("休眠后暂停同步", "Deep sleep pauses sync"), 195, &passport_caption, MUTED);
+        if (editing == DEEP_SLEEP_SETTING) centered(body, ui_text("随身模式生效", "Applies in portable mode"), 211, &passport_caption, MUTED);
     }
     if (notice) centered(body, notice, 235, &passport_caption, LOW);
 }
@@ -739,34 +754,34 @@ static void render_settings(const web_status_t *web, int passkey)
     if (editing >= 0) { render_editor(); return; }
     if (storage_visible) { render_storage(); return; }
     if (about_visible) {
-        label(body, "关于", 16, 3, &passport_heading, TEXT);
+        label(body, ui_text("关于本机", "About"), 16, 3, &passport_heading, TEXT);
         centered(body, "FoloToy", 61, &lv_font_montserrat_28, TEXT);
         centered(body, "AI Passport", 96, &lv_font_montserrat_20, MUTED);
         centered(body, "v" PASSPORT_RELEASE_VERSION, 143, &lv_font_montserrat_28, ACCENT);
-        centered(body, "更新于 " PASSPORT_RELEASE_UPDATED_AT, 182, &passport_caption, MUTED);
+        centered(body, ui_text("更新于 " PASSPORT_RELEASE_UPDATED_AT, "Updated " PASSPORT_RELEASE_UPDATED_AT), 182, &passport_caption, MUTED);
         centered(body, "ESP32-C3  /  8 MiB", 220, &lv_font_montserrat_14, MUTED);
         return;
     }
     if (maintenance_action) {
         bool reset = maintenance_action == MAINTENANCE_RESET;
-        label(body, reset ? "清除数据与设置" : "解除配对", 16, 3, &passport_heading, TEXT);
+        label(body, reset ? ui_text("清除资料和设置", "Erase Data & Settings") : ui_text("解除配对", "Unpair"), 16, 3, &passport_heading, TEXT);
         centered(body, LV_SYMBOL_WARNING, 49, &lv_font_montserrat_28, LOW);
-        lv_obj_t *description = label(body, reset ? "清除个人内容、设置与配对。保留当前固件。" : "断开 Mac 并清除配对记录。", 28, 99, &passport_font, TEXT);
+        lv_obj_t *description = label(body, reset ? ui_text("清除个人内容、设置与配对。保留当前固件。", "Erase personal data, settings and pairing. Keep the firmware.") : ui_text("断开同步连接并清除配对记录。", "Disconnect sync and erase pairing."), 28, 99, &passport_font, TEXT);
         lv_obj_set_width(description, 184);
         lv_obj_set_style_text_align(description, LV_TEXT_ALIGN_CENTER, 0);
         rounded_box(body, 16, 180, 208, 36, confirm_selected ? SURFACE : ACCENT, 10);
         rounded_box(body, 16, 222, 208, 36, confirm_selected ? LOW : SURFACE, 10);
-        centered(body, "取消", 189, &passport_font, confirm_selected ? TEXT : INK);
-        centered(body, reset ? "清除并重启" : "解除并重启", 231, &passport_font, confirm_selected ? INK : LOW);
+        centered(body, ui_text("取消", "Cancel"), 189, &passport_font, confirm_selected ? TEXT : INK);
+        centered(body, reset ? ui_text("清除并重启", "Erase and restart") : ui_text("解除并重启", "Unpair and restart"), 231, &passport_font, confirm_selected ? INK : LOW);
         if (notice) centered(body, notice, 157, &passport_caption, LOW);
         return;
     }
     if (sound_panel) {
         bool chime = sound_panel == SOUND_CHIME;
-        label(body, chime ? "提示音" : "开机音乐", 16, 3, &passport_heading, TEXT);
+        label(body, chime ? ui_text("任务完成提示音", "Task sound") : ui_text("开机音乐", "Startup music"), 16, 3, &passport_heading, TEXT);
         label(body, chime ? LV_SYMBOL_BELL : LV_SYMBOL_AUDIO, 203, 5, &lv_font_montserrat_20, MUTED);
-        const char *boot_entries[] = {"开机播放", "旋律", "试听"};
-        const char *chime_entries[] = {"开启提示音", "随系统音量", "提示音量", "试听"};
+        const char *boot_entries[] = {ui_text("开机播放", "Play on startup"), ui_text("旋律", "Melody"), ui_text("试听", "Preview")};
+        const char *chime_entries[] = {ui_text("开启提示音", "Play alerts"), ui_text("随系统音量", "System volume"), ui_text("提示音量", "Alert volume"), ui_text("试听", "Preview")};
         const char *boot_icons[] = {LV_SYMBOL_POWER, LV_SYMBOL_AUDIO, LV_SYMBOL_PLAY};
         const char *chime_icons[] = {LV_SYMBOL_BELL, LV_SYMBOL_LOOP, LV_SYMBOL_VOLUME_MID, LV_SYMBOL_PLAY};
         uint8_t volume = chime ? music_completion_volume() : MUSIC_VOLUME_FOLLOW;
@@ -790,18 +805,18 @@ static void render_settings(const web_status_t *web, int passkey)
                 lv_obj_set_width(value, 61);
                 lv_obj_set_style_text_align(value, LV_TEXT_ALIGN_RIGHT, 0);
                 if (chime) lv_label_set_text_fmt(value, "%u%%", (unsigned)(volume == MUSIC_VOLUME_FOLLOW ? music_volume() : volume));
-                else lv_label_set_text(value, music.selection == MUSIC_CUSTOM ? "自定义" : music_presets[music.selection].name);
+                else lv_label_set_text(value, music.selection == MUSIC_CUSTOM ? ui_text("自定义", "Custom") : music_preset_name(music.selection));
             }
         }
         if (notice) centered(body, notice, chime ? 238 : 223, &passport_caption, LOW);
         return;
     }
     if (web_visible) {
-        label(body, "网页设置", 16, 3, &passport_heading, TEXT);
+        label(body, ui_text("设备配置", "Device Setup"), 16, 3, &passport_heading, TEXT);
         label(body, web->hotspot ? LV_SYMBOL_WIFI : LV_SYMBOL_HOME, 201, 7,
               &lv_font_montserrat_20, ACCENT);
         bool join = web->hotspot && web_join_qr;
-        centered(body, join ? "1  扫码连接卡片" : web->hotspot ? "2  扫码打开网页" : "扫码打开 · Mac 输入网址",
+        centered(body, join ? ui_text("1  扫码连接卡片热点", "1  Scan to join hotspot") : web->hotspot ? ui_text("2  扫码打开配置页", "2  Scan to open setup") : ui_text("手机扫码 · 电脑输入网址", "Scan or enter the URL"),
                  36, &passport_caption, MUTED);
         char payload[128];
         if (join) snprintf(payload, sizeof payload, "WIFI:T:WPA;S:%s;P:%s;;", web->ssid, web->password);
@@ -819,23 +834,23 @@ static void render_settings(const web_status_t *web, int passkey)
                 lv_obj_delete(qr);
                 centered(body, LV_SYMBOL_WARNING, 105, &lv_font_montserrat_28, LOW);
             }
-        } else centered(body, "连接已断开", 112, &passport_font, LOW);
+        } else centered(body, ui_text("连接已断开", "Connection lost"), 112, &passport_font, LOW);
         if (join) {
             centered(body, web->ssid, 189, &lv_font_montserrat_14, TEXT);
-            label(body, "密码", 39, 212, &passport_caption, MUTED);
-            label(body, web->password, 84, 208, &lv_font_montserrat_20, ACCENT);
+            label(body, ui_text("密码", "Password"), 25, 212, &passport_caption, MUTED);
+            label(body, web->password, 100, 208, &lv_font_montserrat_20, ACCENT);
             centered(body, web->short_url, 235, &lv_font_montserrat_14, TEXT);
         } else {
             centered(body, web->short_url, 198, &lv_font_montserrat_14, TEXT);
             if (!web->hotspot) {
-                label(body, "访问码", 32, 229, &passport_caption, MUTED);
-                label(body, web->code, 94, 221, &lv_font_montserrat_28, ACCENT);
-            } else centered(body, "手机和 Mac 均可编辑", 228, &passport_caption, MUTED);
+                label(body, ui_text("访问码", "Access code"), 18, 229, &passport_caption, MUTED);
+                label(body, web->code, 110, 221, &lv_font_montserrat_28, ACCENT);
+            } else centered(body, ui_text("电脑浏览器也可输入网址", "Or enter the URL in a browser"), 228, &passport_caption, MUTED);
         }
         return;
     }
     if (pairing_visible) {
-        label(body, "连接 Mac", 16, 5, &passport_heading, TEXT);
+        label(body, ui_text("蓝牙配对", "Bluetooth Pairing"), 16, 5, &passport_heading, TEXT);
         bool connected = quota_connected();
         rounded_box(body, 16, 42, 208, 157, SURFACE, 12);
         rounded_box(body, 90, 58, 60, 60, ACCENT, 20);
@@ -843,17 +858,18 @@ static void render_settings(const web_status_t *web, int passkey)
         lv_obj_t *code = centered(body, "", 137, &lv_font_montserrat_28, TEXT);
         if (passkey >= 0) lv_label_set_text_fmt(code, "%03d %03d", passkey / 1000, passkey % 1000);
         else lv_label_set_text(code, connected ? LV_SYMBOL_OK : "--- ---");
-        centered(body, connected ? "已连接" : passkey >= 0 ? "在 Mac 上输入配对码" : "等待 Mac 连接",
-                 218, &passport_caption, MUTED);
+        centered(body, connected ? ui_text("已连接", "Connected") : passkey >= 0 ? ui_text("在电脑上输入配对码", "Enter the code on your computer") : ui_text("打开 Passport Sync", "Open Passport Sync"),
+                 212, &passport_caption, MUTED);
+        if (!connected) centered(body, ui_text("同步应用目前支持 macOS", "Sync app available on macOS"), 237, &passport_caption, MUTED);
         return;
     }
 
     if (bluetooth_visible) {
-        label(body, "Mac 蓝牙", 16, 3, &passport_heading, TEXT);
-        const char *state = !quota_ble_enabled() ? "关闭" : quota_connected() ? "已连接" : quota_paired() ? "未连接" : "未配对";
-        lv_obj_t *status = label(body, state, 155, 9, &passport_caption, quota_connected() ? ACCENT : MUTED);
-        lv_obj_set_width(status, 61); lv_obj_set_style_text_align(status, LV_TEXT_ALIGN_RIGHT, 0);
-        const char *names[] = {"蓝牙开关", "配对 Mac", "解除配对"};
+        label(body, ui_text("蓝牙同步", "Bluetooth"), 16, 3, &passport_heading, TEXT);
+        const char *state = !quota_ble_enabled() ? ui_text("关闭", "Off") : quota_connected() ? ui_text("已连接", "Connected") : quota_paired() ? ui_text("未连接", "Disconnected") : ui_text("未配对", "Not paired");
+        lv_obj_t *status = label(body, state, 120, 9, &passport_caption, quota_connected() ? ACCENT : MUTED);
+        lv_obj_set_width(status, 96); lv_obj_set_style_text_align(status, LV_TEXT_ALIGN_RIGHT, 0);
+        const char *names[] = {ui_text("蓝牙开关", "Bluetooth"), ui_text("开始配对", "Start pairing"), ui_text("解除配对", "Unpair")};
         const char *icons[] = {LV_SYMBOL_POWER, LV_SYMBOL_BLUETOOTH, LV_SYMBOL_CLOSE};
         for (int i = 0; i < 3; ++i) {
             int y = 49 + i * 55;
@@ -867,27 +883,28 @@ static void render_settings(const web_status_t *web, int passkey)
         return;
     }
     if (power_visible) {
-        label(body, "省电", 16, 3, &passport_heading, TEXT);
-        const char *names[] = {"使用模式", "自动休眠"};
+        label(body, ui_text("待机与省电", "Power & Sleep"), 16, 3, &passport_heading, TEXT);
+        const char *names[] = {ui_text("待机模式", "Standby mode"), ui_text("自动深睡", "Auto deep sleep")};
         for (int i = 0; i < 2; ++i) {
             int y = 50 + i * 73;
             focus_card(body, y, 62, i == power_menu);
             label(body, names[i], 30, y + 9, &passport_font, TEXT);
             lv_obj_t *value = label(body, "", 30, y + 34, &passport_caption, MUTED);
-            if (!i) lv_label_set_text(value, preferences.power_mode == POWER_DESKTOP ? "桌面常连" : "随身省电");
-            else lv_label_set_text_fmt(value, "%u 分钟 · 随身模式", preferences.deep_sleep_seconds / 60);
+            if (!i) lv_label_set_text(value, preferences.power_mode == POWER_DESKTOP ? ui_text("桌面常连", "Desk mode") : ui_text("随身省电", "Portable mode"));
+            else lv_label_set_text_fmt(value, ui_text("%u 分钟 · 随身模式", "%u min · Portable mode"), preferences.deep_sleep_seconds / 60);
             label(body, i ? LV_SYMBOL_RIGHT : LV_SYMBOL_REFRESH, 202, y + 23, &lv_font_montserrat_14, MUTED);
         }
-        centered(body, preferences.power_mode == POWER_DESKTOP ? "息屏后继续同步" : "休眠后暂停无线同步", 213, &passport_caption, MUTED);
+        centered(body, preferences.power_mode == POWER_DESKTOP ? ui_text("息屏后继续同步", "Sync stays on with screen off") : ui_text("休眠后暂停无线同步", "Deep sleep pauses wireless sync"), 213, &passport_caption, MUTED);
         if (notice) centered(body, notice, 235, &passport_caption, LOW);
         return;
     }
 
-    label(body, settings_group ? settings_titles[settings_group - 1] : "设置", 16, 3, &passport_heading, TEXT);
+    const char *settings_titles[] = {ui_text("连接", "Connections"), ui_text("显示与声音", "Display & Sound"), ui_text("设备管理", "Device")};
+    label(body, settings_group ? settings_titles[settings_group - 1] : ui_text("设置", "Settings"), 16, 3, &passport_heading, TEXT);
     if (!settings_group) {
         const char *icons[] = {LV_SYMBOL_WIFI, LV_SYMBOL_EYE_OPEN, LV_SYMBOL_SETTINGS};
         const char *levels = "";
-        const char *values[] = {"网页设置 / Mac", levels, preferences.power_mode == POWER_DESKTOP ? "桌面常连" : "随身省电"};
+        const char *values[] = {ui_text("配置 · Wi-Fi · 蓝牙", "Setup · Wi-Fi · BT"), levels, preferences.power_mode == POWER_DESKTOP ? ui_text("桌面常连", "Desk mode") : ui_text("随身省电", "Portable mode")};
         for (int i = 0; i < 3; ++i) {
             int y = 107 + i * 49;
             bool active = i + 1 == selection;
@@ -907,7 +924,7 @@ static void render_settings(const web_status_t *web, int passkey)
         }
         focus_card(body, 41, 60, selection == 0);
         label(body, LV_SYMBOL_SD_CARD, 30, 54, &lv_font_montserrat_20, selection == 0 ? ACCENT : MUTED);
-        label(body, "存储", 64, 47, &passport_font, TEXT);
+        label(body, ui_text("存储", "Storage"), 64, 47, &passport_font, TEXT);
         storage_usage_t usage;
         lv_obj_t *amount = label(body, "--", 112, 51, &lv_font_montserrat_14, MUTED);
         lv_obj_set_width(amount, 100); lv_obj_set_style_text_align(amount, LV_TEXT_ALIGN_RIGHT, 0);
@@ -915,7 +932,7 @@ static void render_settings(const web_status_t *web, int passkey)
             uint32_t pictures = usage.badge + usage.photo;
             lv_label_set_text_fmt(amount, "%u MiB", (unsigned)(usage.total / 1048576));
             lv_obj_t *assets = label(body, "", 64, 71, &passport_caption, MUTED);
-            lv_label_set_text_fmt(assets, "图片 %uK / %u MiB", (unsigned)((pictures + 1023) / 1024), (unsigned)(usage.assets_capacity / 1048576));
+            lv_label_set_text_fmt(assets, ui_text("图片 %uK / %u MiB", "Images %uK / %u MiB"), (unsigned)((pictures + 1023) / 1024), (unsigned)(usage.assets_capacity / 1048576));
             rounded_box(body, 64, 92, 148, 4, TRACK, 2);
             int width = (uint64_t)pictures * 148 / usage.assets_capacity;
             if (width) rounded_box(body, 64, 92, width, 4, ACCENT, 2);
@@ -923,10 +940,10 @@ static void render_settings(const web_status_t *web, int passkey)
         return;
     }
 
-    const char *entries[] = {"网页设置", "Mac 蓝牙", "亮度", "音量", "开机音乐", "息屏", "省电", "解除配对", "清除数据与设置", "日常 Wi-Fi", "蓝牙", "", "", "", "关于", "任务完成提示音"};
+    const char *entries[] = {ui_text("设备配置", "Device Setup"), ui_text("蓝牙同步", "Bluetooth Sync"), ui_text("屏幕亮度", "Brightness"), ui_text("音量", "Volume"), ui_text("开机音乐", "Boot music"), ui_text("息屏时间", "Screen timeout"), ui_text("待机与省电", "Power & Sleep"), ui_text("解除配对", "Unpair"), ui_text("清除资料和设置", "Erase Data & Settings"), ui_text("路由器 Wi-Fi", "Router Wi-Fi"), ui_text("蓝牙", "Bluetooth"), "", "", "", ui_text("关于本机", "About"), ui_text("任务完成提示音", "Task sound"), "", "", ui_text("语言", "Language")};
     const char *icons[] = {LV_SYMBOL_WIFI, LV_SYMBOL_BLUETOOTH,
                           LV_SYMBOL_EYE_OPEN, LV_SYMBOL_VOLUME_MID, LV_SYMBOL_AUDIO, LV_SYMBOL_POWER,
-                          LV_SYMBOL_CHARGE, LV_SYMBOL_CLOSE, LV_SYMBOL_REFRESH, LV_SYMBOL_WIFI, LV_SYMBOL_BLUETOOTH, "", "", "", LV_SYMBOL_LIST, LV_SYMBOL_BELL};
+                          LV_SYMBOL_CHARGE, LV_SYMBOL_CLOSE, LV_SYMBOL_REFRESH, LV_SYMBOL_WIFI, LV_SYMBOL_BLUETOOTH, "", "", "", LV_SYMBOL_LIST, LV_SYMBOL_BELL, "", "", LV_SYMBOL_LIST};
     enum { ROW_TOP = 41, ROW_HEIGHT = 43, ROW_STEP = 49, LIST_HEIGHT = 4 * ROW_STEP + ROW_HEIGHT / 2 };
     int count = settings_counts[settings_group - 1];
     int content_height = (count - 1) * ROW_STEP + ROW_HEIGHT;
@@ -965,22 +982,27 @@ static void render_settings(const web_status_t *web, int passkey)
             bool enabled = music_completion_enabled();
             if (!enabled || volume == MUSIC_VOLUME_FOLLOW) {
                 lv_obj_set_style_text_font(value, &passport_caption, 0);
-                lv_label_set_text(value, enabled ? "随系统" : "关闭");
+                lv_label_set_text(value, enabled ? ui_text("随系统", "System") : ui_text("关闭", "Off"));
             } else lv_label_set_text_fmt(value, "%u%%", (unsigned)volume);
         } else if (i == BRIGHTNESS) lv_label_set_text_fmt(value, "%u%%", preferences.brightness);
         else if (i == VOLUME) lv_label_set_text_fmt(value, "%u%%", preferences.volume);
         else if (i == BOOT_MUSIC) {
             lv_obj_set_style_text_font(value, &passport_caption, 0);
             lv_label_set_text(value, music.enabled ?
-                              (music.selection == MUSIC_CUSTOM ? "自定义" : music_presets[music.selection].name) : "关闭");
+                              (music.selection == MUSIC_CUSTOM ? ui_text("自定义", "Custom") : music_preset_name(music.selection)) : ui_text("关闭", "Off"));
         } else if (i == POWER_MODE) {
             lv_obj_set_style_text_font(value, &passport_caption, 0);
-            lv_label_set_text(value, preferences.power_mode == POWER_DESKTOP ? "桌面" : "随身");
+            lv_label_set_text(value, preferences.power_mode == POWER_DESKTOP ? ui_text("桌面", "Desk") : ui_text("随身", "Portable"));
+        } else if (i == LANGUAGE) {
+            lv_obj_set_style_text_font(value, &passport_caption, 0);
+            lv_label_set_text(value, passport_language() == PASSPORT_EN ? "English" : "中文");
         } else if (i == SLEEP) {
             if (preferences.sleep_seconds) lv_label_set_text_fmt(value, "%us", preferences.sleep_seconds);
             else {
                 lv_obj_set_style_text_font(value, &passport_caption, 0);
-                lv_label_set_text(value, "常亮");
+                lv_obj_set_width(value, 75);
+                lv_obj_set_x(value, 138);
+                lv_label_set_text(value, ui_text("不自动息屏", "Never"));
             }
         } else if (i != RESET) lv_label_set_text(value, LV_SYMBOL_RIGHT);
     }
@@ -1077,7 +1099,7 @@ static void update_completion_toast(int64_t now, int64_t until)
     if (visible && !completion_toast) {
         completion_toast = rounded_box(root, 44, 253, 152, 26, SURFACE, 10);
         label(completion_toast, LV_SYMBOL_OK, 13, 5, &lv_font_montserrat_14, ACCENT);
-        label(completion_toast, "Codex 任务完成", 35, 4, &passport_caption, TEXT);
+        label(completion_toast, ui_text("Codex 任务完成", "Codex task finished"), 35, 4, &passport_caption, TEXT);
     } else if (!visible && completion_toast) {
         lv_obj_delete(completion_toast);
         completion_toast = NULL;
@@ -1111,7 +1133,7 @@ static void save_game_record(void)
     if (err == ESP_OK) game_best = score;
     else {
         ESP_LOGE("passport", "Save game distance: %s", esp_err_to_name(err));
-        notice = "保存失败";
+        notice = ui_text("保存失败", "Save failed");
     }
 }
 
@@ -1152,7 +1174,7 @@ static void update_game_stats(void)
     char text[48];
     snprintf(text, sizeof text, "%u m", (unsigned)meow_distance(&game));
     set_label(game_score, text);
-    snprintf(text, sizeof text, "鱼干 %u    送达 %u", (unsigned)game.fish, (unsigned)game.deliveries);
+    snprintf(text, sizeof text, ui_text("鱼干 %u    送达 %u", "Fish %u    Deliveries %u"), (unsigned)game.fish, (unsigned)game.deliveries);
     set_label(game_totals, text);
 }
 
@@ -1160,22 +1182,22 @@ static void update_game_view(void)
 {
     game_paint = game;
     const meow_obstacle_t *next = &game.track[MEOW_CURRENT];
-    const char *hint = game.rescue_used ? "救援已用" : "";
-    if (game.teaching_left) hint = "短声跳　拖长伸爪";
+    const char *hint = game.rescue_used ? ui_text("救援已用", "Rescue used") : "";
+    if (game.teaching_left) hint = ui_text("短声跳　拖长伸爪", "Short jump · Long stretch");
     char delivered[32];
-    if (!game_ready) hint = "麦克风准备中";
-    else if (game.motion == MEOW_FALL) hint = game.retry_fall ? "抓住屋檐！" : "掉下去啦";
+    if (!game_ready) hint = ui_text("麦克风准备中", "Mic warming up");
+    else if (game.motion == MEOW_FALL) hint = game.retry_fall ? ui_text("抓住屋檐！", "Hold on!") : ui_text("掉下去啦", "You fell!");
     else if (last_game_frame < delivery_hint_until) {
-        snprintf(delivered, sizeof delivered, "已送达 × %u", (unsigned)game.deliveries);
+        snprintf(delivered, sizeof delivered, ui_text("已送达 × %u", "Delivered x %u"), (unsigned)game.deliveries);
         hint = delivered;
-    } else if (game.motion == MEOW_REACH || game.motion == MEOW_PULL) hint = "伸爪！";
-    else if (last_game_frame < fish_hint_until) hint = "鱼干到手！";
+    } else if (game.motion == MEOW_REACH || game.motion == MEOW_PULL) hint = ui_text("伸爪！", "Stretch!");
+    else if (last_game_frame < fish_hint_until) hint = ui_text("鱼干到手！", "Fish collected!");
     else if (next->start - game.x / MEOW_UNIT < 112) {
         switch (next->kind) {
-        case MEOW_BOX: hint = game.teaching_left ? "矮箱 · 短声" : "矮箱"; break;
-        case MEOW_GAP: hint = game.teaching_left ? "宽缝 · 拖长" : "宽缝"; break;
-        case MEOW_AWNING: hint = "雨棚 · 短声捡鱼"; break;
-        case MEOW_CART: hint = "推车 · 看准再跳"; break;
+        case MEOW_BOX: hint = game.teaching_left ? ui_text("矮箱 · 短声", "Box · Short sound") : ui_text("矮箱", "Box"); break;
+        case MEOW_GAP: hint = game.teaching_left ? ui_text("宽缝 · 拖长", "Gap · Hold sound") : ui_text("宽缝", "Gap"); break;
+        case MEOW_AWNING: hint = ui_text("雨棚 · 短声捡鱼", "Awning · Jump for fish"); break;
+        case MEOW_CART: hint = ui_text("推车 · 看准再跳", "Cart · Time your jump"); break;
         default: break;
         }
     }
@@ -1193,18 +1215,18 @@ static void render_game(void)
         meow_game_reset(&game_paint, 0, true);
         game_paint.x = 182 * MEOW_UNIT;
         meow_view_bind(box(body, 16, 8, 208, 130, BG), &game_paint);
-        centered(body, "喵喵快递", 144, &passport_game, 0xffe3ad);
+        centered(body, ui_text("喵喵快递", "Meow Express"), 144, &passport_game, 0xffe3ad);
         lv_obj_t *record = centered(body, "", 170, &passport_game, MUTED);
         if (notice) lv_label_set_text(record, notice);
-        else lv_label_set_text_fmt(record, "最远纪录 %u m", (unsigned)game_best);
+        else lv_label_set_text_fmt(record, ui_text("最远纪录 %u m", "Best %u m"), (unsigned)game_best);
         lv_obj_t *start = rounded_box(body, 59, 200, 122, 29, 0xffb362, 8);
-        lv_obj_center(label(start, "开始", 0, 0, &passport_game, INK));
+        lv_obj_center(label(start, ui_text("开始", "Start"), 0, 0, &passport_game, INK));
         page_icons();
         return;
     }
 
     lv_obj_set_style_bg_color(body, color(0x211b39), 0);
-    label(body, "喵喵快递", 14, 14, &passport_game, 0xffe3ad);
+    label(body, ui_text("喵喵快递", "Meow Express"), 14, 14, &passport_game, 0xffe3ad);
     game_score = label(body, "", 100, 14, &passport_game, 0xffe3ad);
     lv_obj_set_width(game_score, 124);
     lv_obj_set_style_text_align(game_score, LV_TEXT_ALIGN_RIGHT, 0);
@@ -1215,7 +1237,7 @@ static void render_game(void)
     game_totals = label(body, "", 16, 281, &passport_game, 0xe8abc2);
     lv_obj_set_width(game_totals, 208);
     lv_label_set_long_mode(game_totals, LV_LABEL_LONG_DOT);
-    centered(body, "长按确认返回", 303, &passport_caption, 0xc9adc9);
+    centered(body, ui_text("长按确认返回", "Hold OK to go back"), 303, &passport_caption, 0xc9adc9);
     if (game_screen == GAME_PLAY) {
         update_game_view();
         return;
@@ -1224,19 +1246,19 @@ static void render_game(void)
     update_game_stats();
     if (game_screen == GAME_RESULT) {
         rounded_box(body, 20, 81, 200, 139, 0x302244, 10);
-        centered(body, "配送结束", 92, &passport_game, 0xffe3ad);
+        centered(body, ui_text("配送结束", "Run complete"), 92, &passport_game, 0xffe3ad);
         lv_obj_t *distance = centered(body, "", 115, &passport_game, TEXT);
-        lv_label_set_text_fmt(distance, "跑了 %u m", (unsigned)meow_distance(&game));
+        lv_label_set_text_fmt(distance, ui_text("跑了 %u m", "Distance %u m"), (unsigned)meow_distance(&game));
         lv_obj_t *totals = centered(body, "", 138, &passport_game, TEXT);
-        lv_label_set_text_fmt(totals, "鱼干 %u    送达 %u", (unsigned)game.fish, (unsigned)game.deliveries);
+        lv_label_set_text_fmt(totals, ui_text("鱼干 %u    送达 %u", "Fish %u    Deliveries %u"), (unsigned)game.fish, (unsigned)game.deliveries);
         lv_obj_t *record = centered(body, notice ? notice : "", 161, &passport_game, 0xe8abc2);
-        if (!notice) lv_label_set_text_fmt(record, "最远纪录 %u m", (unsigned)game_best);
-        centered(body, "确认重试", 188, &passport_game, 0xffb362);
+        if (!notice) lv_label_set_text_fmt(record, ui_text("最远纪录 %u m", "Best %u m"), (unsigned)game_best);
+        centered(body, ui_text("确认重试", "OK to retry"), 188, &passport_game, 0xffb362);
     } else {
         bool paused = game_screen == GAME_PAUSED;
         rounded_box(body, 25, 108, 190, 73, 0x302244, 10);
-        centered(body, paused ? "已暂停" : "麦克风不可用", 119, &passport_game, 0xffe3ad);
-        centered(body, paused ? "确认继续" : "确认重试", 148, &passport_game, 0xffb362);
+        centered(body, paused ? ui_text("已暂停", "Paused") : ui_text("麦克风不可用", "Microphone unavailable"), 119, &passport_game, 0xffe3ad);
+        centered(body, paused ? ui_text("确认继续", "OK to resume") : ui_text("确认重试", "OK to retry"), 148, &passport_game, 0xffb362);
     }
 }
 
@@ -1290,23 +1312,25 @@ static void rebuild(const web_status_t *web, passport_profile_t content, quota_s
         else {
             rounded_box(body, 88, 108, 64, 64, SURFACE, 20);
             centered(body, LV_SYMBOL_IMAGE, 126, &lv_font_montserrat_28, ACCENT);
-            centered(body, "添加照片", 194, &passport_heading, TEXT);
-            centered(body, "长按确认进入设置", 226, &passport_caption, MUTED);
+            centered(body, ui_text("添加照片", "Add photos"), 194, &passport_heading, TEXT);
+            centered(body, ui_text("长按确认进入设置", "Hold OK for Settings"), 226, &passport_caption, MUTED);
         }
         break;
     }
     case QUOTA: render_quota(quota, now); break;
     case CITY: {
-        static const char *const names[PIXEL_SCENE_COUNT] = {
-            [PIXEL_STREET] = "像\n素\n街\n角",
-            [PIXEL_PARK] = "林\n间\n公\n园",
-            [PIXEL_HARBOR] = "灯\n塔\n海\n湾",
+        const char *const names[PIXEL_SCENE_COUNT] = {
+            [PIXEL_STREET] = ui_text("像\n素\n街\n角", "Pixel\nStreet"),
+            [PIXEL_PARK] = ui_text("林\n间\n公\n园", "Forest\nPark"),
+            [PIXEL_HARBOR] = ui_text("灯\n塔\n海\n湾", "Lighthouse\nBay"),
         };
         int64_t frame_at = esp_timer_get_time();
         pixel_city_init(&city, body, preferences.scene);
         lv_obj_move_foreground(header);
         if (frame_at < city_title_until) {
-            city_title = rounded_box(body, WIDTH - 43, HEADER_HEIGHT + 9, 27, 80, BG, 10);
+            bool english = passport_language() == PASSPORT_EN;
+            int width = english ? 96 : 27;
+            city_title = rounded_box(body, WIDTH - width - 16, HEADER_HEIGHT + 9, width, english ? 44 : 80, BG, 10);
             lv_obj_set_style_bg_opa(city_title, LV_OPA_90, 0);
             lv_obj_center(label(city_title, names[preferences.scene], 0, 0, &passport_caption, TEXT));
         }
@@ -1349,7 +1373,7 @@ static esp_err_t persist(unsigned mask)
     preferences = preferences_snapshot();
     if (err != ESP_OK) {
         ESP_LOGE("passport", "Settings save: %s", esp_err_to_name(err));
-        notice = "保存失败";
+        notice = ui_text("保存失败", "Save failed");
     }
     if ((mask & PREF_BRIGHTNESS) && !dark) bsp_display_backlight(preferences.brightness);
     if (mask & PREF_VOLUME) music_set_volume(preferences.volume);
@@ -1361,6 +1385,7 @@ static void open_editor(int setting)
     notice = NULL;
     editing = setting;
     switch (setting) {
+    case LANGUAGE: edit_draft = passport_language(); break;
     case WIFI_POWER: edit_draft = network_enabled(); break;
     case BLE_POWER: edit_draft = quota_ble_enabled(); break;
     case TASK_CHIME_ENABLE: edit_draft = music_completion_enabled(); break;
@@ -1389,6 +1414,7 @@ static esp_err_t save_editor(void)
 {
     if (edit_draft == edit_saved) return ESP_OK;
     switch (editing) {
+    case LANGUAGE: return save_language(edit_draft);
     case WIFI_POWER: return network_set_enabled(edit_draft);
     case BLE_POWER: return quota_ble_set_enabled(edit_draft);
     case TASK_CHIME_ENABLE: return music_set_completion_enabled(edit_draft);
@@ -1421,10 +1447,10 @@ static void preview_selected_melody(void)
 {
     // 试听由上下键切换触发，和保存、页面重绘分开。
     esp_err_t err = music_preview_selection(edit_draft);
-    if (err == ESP_ERR_NOT_ALLOWED) notice = "当前已静音";
+    if (err == ESP_ERR_NOT_ALLOWED) notice = ui_text("当前已静音", "Sound is muted");
     else if (err != ESP_OK) {
         ESP_LOGE("passport", "Preview melody %d: %s", edit_draft, esp_err_to_name(err));
-        notice = "音乐设置失败";
+        notice = ui_text("音乐设置失败", "Music setup failed");
     }
 }
 
@@ -1438,7 +1464,7 @@ static void activate_setting(int setting)
     editing = -1;
     if (err != ESP_OK) {
         ESP_LOGE("passport", "Toggle setting %d: %s", setting, esp_err_to_name(err));
-        notice = "保存失败";
+        notice = ui_text("保存失败", "Save failed");
     }
 }
 
@@ -1480,7 +1506,7 @@ static void handle_sound_panel(uint8_t key)
         else if (music_menu == MUSIC_MELODY) activate_setting(MUSIC_SELECTION_SETTING);
         else if (music_menu == MUSIC_PREVIEW) err = music_preview_current();
     }
-    if (err != ESP_OK) notice = err == ESP_ERR_NOT_ALLOWED ? "当前已静音" : "音乐设置失败";
+    if (err != ESP_OK) notice = err == ESP_ERR_NOT_ALLOWED ? ui_text("当前已静音", "Sound is muted") : ui_text("音乐设置失败", "Music setup failed");
 }
 
 static void handle_button(uint8_t key, int64_t now)
@@ -1569,9 +1595,9 @@ static void handle_button(uint8_t key, int64_t now)
             esp_err_t err = save_editor();
             if (err == ESP_OK) {
                 if (editing == MUSIC_SELECTION_SETTING) music_stop();
-                editing = -1; notice = "已保存";
+                editing = -1; notice = ui_text("已保存", "Saved");
             }
-            else { ESP_LOGE("passport", "Apply setting %d: %s", editing, esp_err_to_name(err)); notice = "保存失败"; }
+            else { ESP_LOGE("passport", "Apply setting %d: %s", editing, esp_err_to_name(err)); notice = ui_text("保存失败", "Save failed"); }
         } else if (editing == BRIGHTNESS || editing == VOLUME || editing == TASK_CHIME_VOLUME) {
             int low = editing == BRIGHTNESS ? 10 : 0;
             edit_draft += key == BSP_BTN_UP ? 10 : -10;
@@ -1592,7 +1618,7 @@ static void handle_button(uint8_t key, int64_t now)
             esp_err_t err = schedule_maintenance(action);
             if (err == ESP_OK) { close_detail(); esp_restart(); }
             ESP_LOGE("passport", "Schedule maintenance: %s", esp_err_to_name(err));
-            notice = "操作失败，请重试";
+            notice = ui_text("操作失败，请重试", "Try again");
         }
         return;
     }
@@ -1602,11 +1628,11 @@ static void handle_button(uint8_t key, int64_t now)
     }
     if (web_visible) {
         if (key == BSP_BTN_OK) return;
-        if (web_status().hotspot) web_join_qr = !web_join_qr;
+        if (network_hotspot_active()) web_join_qr = !web_join_qr;
         else {
             esp_err_t err = web_open(true);
             web_join_qr = true;
-            if (err != ESP_OK) { close_detail(); notice = "热点启动失败"; }
+            if (err != ESP_OK) { close_detail(); notice = ui_text("热点启动失败", "Hotspot failed to start"); }
         }
         return;
     }
@@ -1617,7 +1643,7 @@ static void handle_button(uint8_t key, int64_t now)
         if (key != BSP_BTN_OK) bluetooth_menu = (bluetooth_menu + (key == BSP_BTN_UP ? 2 : 1)) % 3;
         else if (bluetooth_menu == 0) activate_setting(BLE_POWER);
         else if (bluetooth_menu == 1) {
-            if (!quota_ble_enabled()) notice = "请先开启蓝牙";
+            if (!quota_ble_enabled()) notice = ui_text("请先开启蓝牙", "Turn on Bluetooth first");
             else { quota_pair(); pairing_visible = true; config_deadline = now + 120000000; }
         } else { maintenance_action = MAINTENANCE_FORGET_MAC; confirm_selected = false; }
         return;
@@ -1643,6 +1669,9 @@ static void handle_button(uint8_t key, int64_t now)
     uint8_t menu = settings_items[settings_group - 1][selection];
 
     switch (menu) {
+    case LANGUAGE:
+        open_editor(menu);
+        break;
     case WIFI_POWER:
     case BLE_POWER:
     case BRIGHTNESS:
@@ -1653,8 +1682,8 @@ static void handle_button(uint8_t key, int64_t now)
     case WEB_SETUP:
         if (web_open(false) == ESP_OK) {
             web_visible = true;
-            web_join_qr = web_status().hotspot;
-        } else notice = "网页设置启动失败";
+            web_join_qr = network_hotspot_active();
+        } else notice = ui_text("设备配置启动失败", "Couldn't open setup");
         break;
     case PAIR:
         bluetooth_visible = true;
@@ -1730,6 +1759,7 @@ static void log_runtime_budget(bool input)
 void app_main(void)
 {
     ESP_ERROR_CHECK(storage_init());
+    passport_language_t displayed_language = passport_language();
     preferences = preferences_snapshot();
     game_best = load_meow_best();
     // 首个无尽版在 35 米左右过完教学；旧纪录达到 36 米就已通过。
@@ -1753,6 +1783,7 @@ void app_main(void)
     web_init();
     quota_ble_init();
     assert(bsp_lvgl_lock(0));
+    ESP_ERROR_CHECK(pixel_city_install_decoder() ? ESP_OK : ESP_ERR_NO_MEM);
     ESP_ERROR_CHECK(photo_jpeg_install_decoder() ? ESP_OK : ESP_ERR_NOT_FOUND);
     init_screen();
     lv_display_add_event_cb(display, photo_render_ready, LV_EVENT_REFR_READY, NULL);
@@ -1799,6 +1830,12 @@ void app_main(void)
             last_input = now;
         }
         preferences = updated;
+        passport_language_t current_language = passport_language();
+        if (displayed_language != current_language) {
+            displayed_language = current_language;
+            notice = NULL;
+            dirty = true;
+        }
         if (pressed) handle_button(key, now);
         bool game_frame = preferences.page == GAME && !dark && tick_game(now);
         web_poll();

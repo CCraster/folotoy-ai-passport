@@ -56,7 +56,12 @@ private func testTaskJournal() throws {
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
     let first = root.appendingPathComponent("one.jsonl"), second = root.appendingPathComponent("two.jsonl")
+    let child = root.appendingPathComponent("child.jsonl")
     let start = Date()
+    func writeSource(_ file: URL, _ source: Any) throws {
+        let meta = ["type": "session_meta", "payload": ["source": source]] as [String: Any]
+        try (JSONSerialization.data(withJSONObject: meta) + Data([10])).write(to: file)
+    }
     func append(_ file: URL, _ kind: String, _ turn: String, root: String? = nil, finished: Date? = nil) throws {
         var event: [String: Any] = ["type":kind, "turn_id":turn, "root_turn_id":root ?? turn]
         if let finished { event["completed_at"] = Int(finished.timeIntervalSince1970) }
@@ -67,9 +72,12 @@ private func testTaskJournal() throws {
         try stream.seekToEnd()
         try stream.write(contentsOf: line)
     }
+    try writeSource(first, "vscode")
+    try writeSource(child, ["subagent": "review"])
+    try append(child, "task_started", "child")
     try append(first, "task_started", "historic")
     try append(first, "task_complete", "historic", finished: start)
-    try append(first, "task_started", "a")
+    try append(first, "task_started", "a", root: "another-session-turn")
     // 模拟附件和工具输出把开始事件推离最后 512 KiB。
     let output = try FileHandle(forWritingTo: first)
     try output.seekToEnd()
@@ -80,7 +88,7 @@ private func testTaskJournal() throws {
     let journal = CodexTaskJournal(root: root)
     precondition(journal.scan(now: start) == CodexTaskStatus(active: 2))
     let secondPoll = start.addingTimeInterval(3)
-    try append(first, "task_complete", "a", finished: secondPoll)
+    try append(first, "task_complete", "a", root: "another-session-turn", finished: secondPoll)
     precondition(journal.scan(now: secondPoll) == CodexTaskStatus(active: 1, completed: true))
     try append(second, "turn_aborted", "b")
     try append(second, "task_complete", "b", finished: secondPoll)
@@ -88,5 +96,5 @@ private func testTaskJournal() throws {
     precondition(journal.scan(now: secondPoll.addingTimeInterval(4), baseline: true) == CodexTaskStatus(active: 0))
     precondition(Array(syncStatusPacket(active: 2, quotaFailed: true, completed: true)) == [1,7,2])
     precondition(Array(syncStatusPacket(active: nil, quotaFailed: true, completed: true)) == [1,1,0])
-    print("Task status checks passed: parallel tasks, subagent filtering, completion, abort and reconnect baseline.")
+    print("Task status checks passed: parallel and cross-session tasks, subagent filtering, completion, abort and reconnect baseline.")
 }

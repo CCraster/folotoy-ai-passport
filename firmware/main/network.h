@@ -5,12 +5,17 @@
 #include "esp_err.h"
 
 #define NETWORK_LIST_MAX 12
+typedef enum {
+    NETWORK_MESSAGE_NONE, NETWORK_SCAN_FAILED, NETWORK_CONNECTED_SAVED,
+    NETWORK_SAVE_FAILED, NETWORK_CONNECT_FAILED,
+} network_message_t;
+
 typedef struct { char ssid[33]; int8_t signal; bool secure; } network_entry_t;
 typedef struct {
     uint32_t ip, ap_ip;
     bool enabled, hotspot, client, scanning, connecting, error;
     char ssid[33], password[17], connected_ssid[33];
-    char message[96];
+    network_message_t message;
     unsigned count;
     network_entry_t entries[NETWORK_LIST_MAX];
 } network_status_t;

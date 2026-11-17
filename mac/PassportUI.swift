@@ -29,9 +29,11 @@ enum PassportUI {
         button.layer?.cornerRadius = 10
         button.layer?.backgroundColor = (primary ? accent : destructive ? danger : NSColor(white: 0.16, alpha: 1)).cgColor
         button.contentTintColor = primary || destructive ? .black : .labelColor
-        button.font = .systemFont(ofSize: 13, weight: .medium)
+        let font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        button.font = font
         button.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        button.widthAnchor.constraint(greaterThanOrEqualToConstant: 94).isActive = true
+        let titleWidth = (title as NSString).size(withAttributes: [.font: font]).width
+        button.widthAnchor.constraint(greaterThanOrEqualToConstant: max(94, ceil(titleWidth) + 24)).isActive = true
         return button
     }
 
@@ -77,7 +79,7 @@ enum PassportUI {
 final class PassportDialog: NSObject, NSWindowDelegate {
     let panel: NSPanel
 
-    init(title: String, detail: String, content: NSView? = nil, confirm: String = "完成",
+    init(title: String, detail: String, content: NSView? = nil, confirm: String = appText("完成", "Done"),
          cancel: String? = nil, destructive: Bool = false) {
         panel = NSPanel(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
         super.init()

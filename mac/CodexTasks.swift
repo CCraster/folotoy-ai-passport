@@ -25,10 +25,12 @@ final class CodexTaskJournal {
     private struct Session {
         var cursor: UInt64 = 0
         var active: Set<String> = []
+        var isSubagent: Bool?
     }
 
     private static let lifecycleTags = ["task_started", "task_complete", "turn_aborted"]
         .map { Data(("\"" + $0 + "\"").utf8) }
+    private static let baselineLimit: UInt64 = 8 * 1024 * 1024
     private let root: URL
     private var sessions: [URL: Session] = [:]
     private var previousScan: Date?
@@ -40,6 +42,27 @@ final class CodexTaskJournal {
         self.root = root ?? home.appendingPathComponent("sessions")
         decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
+    }
+
+    // Cross-session work can have a different root turn even in a user-visible session.
+    private static func readIsSubagent(_ file: FileHandle) throws -> Bool? {
+        var line = Data()
+        while line.count < Int(baselineLimit) {
+            let count = min(16 * 1024, Int(baselineLimit) - line.count)
+            guard let chunk = try file.read(upToCount: count), !chunk.isEmpty else { return nil }
+            guard let newline = chunk.firstIndex(of: 10) else {
+                line.append(chunk)
+                continue
+            }
+            line.append(chunk[..<newline])
+            guard let meta = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
+                  meta["type"] as? String == "session_meta",
+                  let payload = meta["payload"] as? [String: Any] else { return nil }
+            if let source = payload["source"] as? String { return source == "subagent" }
+            if let source = payload["source"] as? [String: Any], source["subagent"] != nil { return true }
+            return nil
+        }
+        return nil
     }
 
     func scan(now: Date = Date(), baseline: Bool = false) -> CodexTaskStatus {
@@ -70,15 +93,27 @@ final class CodexTaskJournal {
                 var state = sessions[file] ?? Session()
                 let size = UInt64(bytes)
                 if size < state.cursor { state = Session() }
+                if state.isSubagent == true {
+                    next[file] = state
+                    continue
+                }
                 // 首次连接时长任务的开始事件可能已经隔了许多输出和附件。
                 // 用较长的尾段建立基线，随后只处理追加内容。
-                let limit: UInt64 = state.cursor == 0 ? 8 * 1024 * 1024 : 512 * 1024
+                let limit: UInt64 = state.cursor == 0 ? Self.baselineLimit : 512 * 1024
                 let floor = size > limit ? size - limit : 0
                 let start = max(floor, state.cursor)
                 if start != state.cursor { state.active.removeAll() }
                 if start < size {
                     let handle = try FileHandle(forReadingFrom: file)
                     defer { try? handle.close() }
+                    if state.cursor == 0 {
+                        state.isSubagent = try Self.readIsSubagent(handle)
+                        if state.isSubagent == true {
+                            state.cursor = size
+                            next[file] = state
+                            continue
+                        }
+                    }
                     try handle.seek(toOffset: start)
                     if let chunk = try handle.read(upToCount: Int(size - start)) {
                         var lineStart = chunk.startIndex
@@ -91,7 +126,8 @@ final class CodexTaskJournal {
                             guard Self.lifecycleTags.contains(where: { line.range(of: $0) != nil }),
                                   let event = try? decoder.decode(Event.self, from: line),
                                   event.type == "event_msg", let turn = event.payload.turnId,
-                                  event.payload.rootTurnId == nil || event.payload.rootTurnId == turn else { continue }
+                                  state.isSubagent == false || event.payload.rootTurnId == nil ||
+                                    event.payload.rootTurnId == turn else { continue }
                             switch event.payload.type {
                             case "task_started": state.active.insert(turn)
                             case "task_complete":

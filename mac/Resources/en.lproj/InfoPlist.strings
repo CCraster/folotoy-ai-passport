@@ -1,0 +1,2 @@
+"NSLocalNetworkUsageDescription" = "Connect to your AI Passport on the local network to configure it and manage backups.";
+"NSBluetoothAlwaysUsageDescription" = "Sync Codex quota and task status to your AI Passport over Bluetooth.";

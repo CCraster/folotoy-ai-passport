@@ -6,6 +6,8 @@
 // 包含实现以注入 NVS、队列及 I2S 故障，验证真实播放和保存逻辑。
 #include "../firmware/main/music.c"
 
+passport_language_t passport_language(void) { return PASSPORT_ZH; }
+
 static audio_command_t queued;
 static unsigned pending, writes, stop_after, mute_after, fail_after;
 static bool audible;

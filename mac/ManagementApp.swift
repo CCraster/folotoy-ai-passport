@@ -17,11 +17,11 @@ private func isCodexExecutable(_ path: String) -> Bool {
 
 func loginState() -> String {
     switch SMAppService.mainApp.status {
-    case .enabled: return "已开启"
-    case .requiresApproval: return "等待系统允许"
-    case .notRegistered: return "已关闭"
-    case .notFound: return "应用尚未正确安装"
-    @unknown default: return "状态未知"
+    case .enabled: return appText("已开启", "On")
+    case .requiresApproval: return appText("等待系统允许", "Awaiting system approval")
+    case .notRegistered: return appText("已关闭", "Off")
+    case .notFound: return appText("找不到登录启动项", "Login item not found")
+    @unknown default: return appText("状态未知", "Unknown")
     }
 }
 
@@ -30,7 +30,7 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
     private var window: NSWindow!
     private var statusItem: NSStatusItem!
     private var backupWindow: BackupWindow?
-    private let taskLabel = NSTextField(labelWithString: "—")
+    private var taskLabel = NSTextField(labelWithString: "—")
     private var connectionLabel = NSTextField(labelWithString: "—")
     private var syncLabel = NSTextField(labelWithString: "—")
     private var quotaLabel = NSTextField(labelWithString: "—")
@@ -89,13 +89,13 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         ]
         let field = NSTextField(string: current ?? candidates.first(where: isCodexExecutable) ?? "")
         field.placeholderString = "/opt/homebrew/bin/codex"
-        field.setAccessibilityLabel("Codex CLI 路径")
-        let instructions = "请先安装 Codex CLI 并运行 codex login。可在终端运行 command -v codex，将输出的完整路径填在这里。"
+        field.setAccessibilityLabel(appText("Codex CLI 路径", "Codex CLI path"))
+        let instructions = appText("请先安装 Codex CLI 并运行 codex login。可在终端运行 command -v codex，将输出的完整路径填在这里。", "Install the Codex CLI and run codex login. In Terminal, run command -v codex and paste the full path here.")
         var detail = instructions
-        while PassportDialog(title: "连接 Codex CLI", detail: detail, content: field, confirm: "继续", cancel: "取消").run() {
+        while PassportDialog(title: appText("连接 Codex CLI", "Connect Codex CLI"), detail: detail, content: field, confirm: appText("继续", "Continue"), cancel: appText("取消", "Cancel")).run() {
             let path = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             if isCodexExecutable(path) { return path }
-            detail = "该位置没有可执行文件。\n\(instructions)"
+            detail = appText("该位置没有可执行文件。\n\(instructions)", "No executable was found at that path.\n\(instructions)")
         }
         return nil
     }
@@ -109,7 +109,18 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
     }
 
     private func buildWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 550),
+        taskLabel = NSTextField(labelWithString: "—")
+        connectionLabel = NSTextField(labelWithString: "—")
+        syncLabel = NSTextField(labelWithString: "—")
+        quotaLabel = NSTextField(labelWithString: "—")
+        resetLabel = NSTextField(labelWithString: "—")
+        expiryLabel = NSTextField(wrappingLabelWithString: "")
+        nextExpiryLabel = NSTextField(labelWithString: "")
+        quotaNote = NSTextField(labelWithString: "")
+        quotaMeter = QuotaMeter()
+        errorLabel = NSTextField(wrappingLabelWithString: "")
+        runtimeLabel = NSTextField(labelWithString: "")
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 532),
                           styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "Passport Sync"; window.delegate = self; window.isReleasedWhenClosed = false
         window.titleVisibility = .hidden
@@ -128,25 +139,25 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         mark.heightAnchor.constraint(equalToConstant: 40).isActive = true
         connectionLabel.font = .systemFont(ofSize: 12, weight: .medium)
         connectionLabel.textColor = accent
-        let heading = PassportUI.row([mark, PassportUI.column([PassportUI.label("Passport", size: 25, color: .labelColor), PassportUI.label("FoloToy AI Passport", size: 11)], spacing: 3), NSView(), connectionLabel])
+        let heading = PassportUI.row([mark, PassportUI.column([PassportUI.label("Passport Sync", size: 25, color: .labelColor), PassportUI.label("FoloToy AI Passport", size: 11)], spacing: 3), NSView(), connectionLabel])
         stack.addArrangedSubview(heading); heading.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
         quotaLabel.font = .monospacedDigitSystemFont(ofSize: 52, weight: .medium); quotaLabel.textColor = accent
         quotaNote.font = .systemFont(ofSize: 11); quotaNote.textColor = .secondaryLabelColor
         quotaMeter.heightAnchor.constraint(equalToConstant: 6).isActive = true
-        let quota = PassportUI.card([PassportUI.label("CODEX 剩余额度", size: 11), quotaLabel, quotaMeter, quotaNote])
+        let quota = PassportUI.card([PassportUI.label(appText("CODEX 剩余额度", "CODEX QUOTA LEFT"), size: 11), quotaLabel, quotaMeter, quotaNote])
         quotaMeter.widthAnchor.constraint(equalTo: quota.widthAnchor, constant: -36).isActive = true
         resetLabel.font = .monospacedDigitSystemFont(ofSize: 40, weight: .medium); resetLabel.textColor = .labelColor
         nextExpiryLabel.font = .systemFont(ofSize: 12); nextExpiryLabel.textColor = .labelColor
         expiryLabel.font = .systemFont(ofSize: 11); expiryLabel.textColor = .secondaryLabelColor
         expiryLabel.maximumNumberOfLines = 2
-        let resets = PassportUI.card([PassportUI.label("可用重置卡", size: 11), resetLabel, nextExpiryLabel, expiryLabel])
+        let resets = PassportUI.card([PassportUI.label(appText("可用重置卡", "AVAILABLE RESET CARDS"), size: 11), resetLabel, nextExpiryLabel, expiryLabel])
         let cards = PassportUI.row([quota, resets], spacing: 12); cards.distribution = .fillEqually; cards.alignment = .top
         quota.heightAnchor.constraint(equalToConstant: 210).isActive = true
         resets.heightAnchor.constraint(equalToConstant: 210).isActive = true
         stack.addArrangedSubview(cards); cards.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
-        let taskTitle = PassportUI.label("进行中的 Codex 任务", color: .labelColor, weight: .medium)
+        let taskTitle = PassportUI.label(appText("进行中的 Codex 任务", "Active Codex tasks"), color: .labelColor, weight: .medium)
         taskLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         taskLabel.textColor = .secondaryLabelColor
         taskLabel.lineBreakMode = .byTruncatingMiddle
@@ -156,21 +167,19 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         taskRow.widthAnchor.constraint(equalTo: tasks.widthAnchor, constant: -24).isActive = true
         stack.addArrangedSubview(tasks); tasks.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
-        syncButton = PassportUI.button("立即同步", self, #selector(syncNow), primary: true)
-        pauseButton = PassportUI.button("暂停同步", self, #selector(togglePause))
+        syncButton = PassportUI.button(appText("立即同步", "Sync Now"), self, #selector(syncNow), primary: true)
+        pauseButton = PassportUI.button(appText("暂停同步", "Pause Sync"), self, #selector(togglePause))
         syncLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular); syncLabel.textColor = .secondaryLabelColor
         let actions = PassportUI.row([syncButton, pauseButton, NSView(), syncLabel], spacing: 10)
         stack.addArrangedSubview(actions); actions.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
-        loginSwitch = NSSwitch(); loginSwitch.target = self; loginSwitch.action = #selector(toggleLogin)
-        let launch = PassportUI.row([PassportUI.label("登录 Mac 时自动启动", size: 13, color: .labelColor), NSView(), loginSwitch])
-        stack.addArrangedSubview(launch); launch.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         errorLabel.font = .systemFont(ofSize: 12); errorLabel.textColor = .systemOrange
         errorLabel.maximumNumberOfLines = 2; stack.addArrangedSubview(errorLabel)
         errorLabel.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         runtimeLabel.font = .systemFont(ofSize: 11); runtimeLabel.textColor = .tertiaryLabelColor
-        let manage = PassportUI.button("管理…", self, #selector(manageApp(_:))); manage.widthAnchor.constraint(equalToConstant: 94).isActive = true
-        let footer = PassportUI.row([runtimeLabel, NSView(), manage])
+        let setup = PassportUI.button(appText("设备配置…", "Device Setup…"), self, #selector(showDeviceSetup))
+        let settings = PassportUI.button(appText("应用设置…", "App Settings…"), self, #selector(showAppSettings))
+        let footer = PassportUI.row([runtimeLabel, NSView(), setup, settings])
         stack.addArrangedSubview(footer); footer.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
     private func command(_ title: String, _ symbol: String, _ action: Selector) -> NSMenuItem {
@@ -180,19 +189,18 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         return item
     }
 
-    @objc private func manageApp(_ sender: NSButton) {
-        let menu = NSMenu()
-        menu.items = [
-            command("Codex CLI…", "terminal", #selector(editCodexPath)),
-            command("SSH 任务来源…", "network", #selector(editRemoteSource)),
-            command("资料备份", "externaldrive", #selector(showBackup)),
-            command("诊断信息", "waveform.path", #selector(diagnostics)),
-            command("系统登录项", "gearshape", #selector(openLoginSettings)),
+    private func managementMenu() -> NSMenuItem {
+        let title = appText("管理", "Management")
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: title)
+        submenu.items = [
+            command(appText("诊断信息", "Diagnostics"), "waveform.path", #selector(diagnostics)),
             .separator(),
-            command("停用后台", "stop.circle", #selector(stopApp)),
-            command("卸载…", "trash", #selector(uninstall)),
+            command(appText("停用后台", "Disable Background Sync"), "stop.circle", #selector(stopApp)),
+            command(appText("卸载…", "Uninstall…"), "trash", #selector(uninstall)),
         ]
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.isFlipped ? sender.bounds.maxY : sender.bounds.minY), in: sender)
+        item.submenu = submenu
+        return item
     }
 
     private func buildMenu() {
@@ -205,15 +213,21 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
     }
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.autoenablesItems = false
-        let sync = command("立即同步", "arrow.clockwise", #selector(syncNow))
-        sync.isEnabled = engine.connected && !engine.paused
-        menu.items = [
-            command("打开 Passport Sync", "rectangle.on.rectangle", #selector(showWindow)),
+        menu.items = statusMenuItems(paused: engine.paused, connected: engine.connected)
+    }
+
+    private func statusMenuItems(paused: Bool, connected: Bool) -> [NSMenuItem] {
+        let sync = command(appText("立即同步", "Sync Now"), "arrow.clockwise", #selector(syncNow))
+        sync.isEnabled = connected && !paused
+        return [
+            command(appText("打开 Passport Sync", "Open Passport Sync"), "rectangle.on.rectangle", #selector(showWindow)),
             .separator(), sync,
-            command(engine.paused ? "恢复同步" : "暂停同步", engine.paused ? "play" : "pause", #selector(togglePause)),
-            command("资料备份", "externaldrive", #selector(showBackup)),
+            command(paused ? appText("恢复同步", "Resume Sync") : appText("暂停同步", "Pause Sync"), paused ? "play" : "pause", #selector(togglePause)),
             .separator(),
-            command("停用后台", "stop.circle", #selector(stopApp)),
+            command(appText("设备配置…", "Device Setup…"), "slider.horizontal.3", #selector(showDeviceSetup)),
+            command(appText("备份与恢复…", "Backup & Restore…"), "externaldrive", #selector(showBackup)),
+            command(appText("应用设置…", "App Settings…"), "gearshape", #selector(showAppSettings)),
+            managementMenu(),
         ]
     }
 
@@ -226,15 +240,21 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         if backupWindow == nil { NSApp.setActivationPolicy(.accessory) }
     }
 
-    @objc private func showBackup() {
+    @objc private func showDeviceSetup() { showDevice(.setup) }
+    @objc private func showBackup() { showDevice(.backup) }
+
+    private func showDevice(_ destination: BackupWindow.Destination) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        if let backupWindow { backupWindow.window.makeKeyAndOrderFront(nil); return }
-        guard let address = BackupWindow.requestAddress() else {
+        if let backupWindow {
+            backupWindow.show(destination)
+            return
+        }
+        guard let address = BackupWindow.requestAddress(destination) else {
             if !window.isVisible { NSApp.setActivationPolicy(.accessory) }
             return
         }
-        let backup = BackupWindow(address: address)
+        let backup = BackupWindow(address: address, destination: destination)
         backup.closed = { [weak self] in
             guard let self else { return }
             self.backupWindow = nil
@@ -246,40 +266,86 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationDidBecomeActive(_ notification: Notification) { if engine != nil { update() } }
 
+    @objc func showAppSettings() {
+        showWindow()
+        let language = NSPopUpButton()
+        language.addItems(withTitles: AppLanguage.allCases.map(\.title))
+        language.selectItem(at: AppLanguage.allCases.firstIndex(of: AppLanguage.saved()) ?? 0)
+        let launch = NSSwitch()
+        launch.target = self
+        launch.action = #selector(toggleLogin)
+        launch.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        loginSwitch = launch
+        defer { loginSwitch = nil }
+
+        let languageRow = PassportUI.row([
+            PassportUI.label(appText("界面语言", "App language"), color: .labelColor), NSView(), language,
+        ])
+        let loginRow = PassportUI.row([
+            PassportUI.label(appText("登录 Mac 时自动启动", "Launch at login"), color: .labelColor), NSView(), launch,
+        ])
+        let cli = PassportUI.button(appText("Codex CLI…", "Codex CLI…"), self, #selector(editCodexPath))
+        let ssh = PassportUI.button(appText("SSH 任务来源…", "SSH Task Source…"), self, #selector(editRemoteSource))
+        let systemLogin = PassportUI.button(appText("系统登录项", "System Login Items"), self, #selector(openLoginSettings))
+        let contents = PassportUI.column([languageRow, loginRow, cli, ssh, systemLogin], spacing: 12)
+        languageRow.widthAnchor.constraint(equalTo: contents.widthAnchor).isActive = true
+        loginRow.widthAnchor.constraint(equalTo: contents.widthAnchor).isActive = true
+        let dialog = PassportDialog(title: appText("应用设置", "App Settings"),
+            detail: appText("应用语言与卡片语言分别保存。", "App and device languages are saved separately."),
+            content: contents, confirm: appText("完成", "Done"))
+        guard dialog.run(), AppLanguage.allCases.indices.contains(language.indexOfSelectedItem) else { return }
+        let chosen = AppLanguage.allCases[language.indexOfSelectedItem]
+        guard chosen != AppLanguage.saved() else { return }
+        chosen.save()
+        let old = window!
+        buildWindow()
+        window.setFrameOrigin(old.frame.origin)
+        old.delegate = nil
+        old.close()
+        NSApp.mainMenu = PassportMain.mainMenu()
+        backupWindow?.refreshLanguage()
+        update()
+        showWindow()
+    }
+
     private func formatted(_ date: Date?, full: Bool = false) -> String {
-        guard let date else { return "尚未同步" }
+        guard let date else { return appText("尚未同步", "No sync yet") }
         let formatter = DateFormatter(); formatter.dateFormat = full ? "MM/dd HH:mm" : "HH:mm:ss"
         return formatter.string(from: date)
     }
     private func update() {
-        connectionLabel.stringValue = engine.paused ? "已暂停" : engine.connection
-        syncLabel.stringValue = engine.lastSync.map { "同步于 " + formatted($0) } ?? "等待首次同步"
+        connectionLabel.stringValue = engine.paused ? appText("已暂停", "Paused") : engine.connectionTitle
+        syncLabel.stringValue = engine.lastSync.map { appText("同步于 ", "Synced at ") + formatted($0) } ?? appText("等待首次同步", "Waiting for first sync")
         let latest: QuotaData? = engine.latest
         let windows: [QuotaWindow] = (latest?.windows ?? []).filter { $0.minutes > 0 }
         quotaLabel.stringValue = windows.isEmpty ? "—" : windows.map { "\($0.remaining)%" }.joined(separator: " / ")
         quotaLabel.font = .monospacedDigitSystemFont(ofSize: windows.count > 1 ? 31 : 52, weight: .medium)
         quotaMeter.value = Double(windows.first?.remaining ?? 0)
         if let first = windows.first {
-            let duration = first.minutes >= 1440 ? "\(first.minutes / 1440) 天窗口" : "\(first.minutes / 60) 小时窗口"
-            quotaNote.stringValue = duration + (first.resetAt > 0 ? " · " + formatted(Date(timeIntervalSince1970: Double(first.resetAt)), full: true) + " 重置" : "")
-        } else { quotaNote.stringValue = "等待 Codex 数据" }
-        resetLabel.stringValue = engine.latest?.resets.map { "\($0.availableCount) 张" } ?? "—"
+            let duration = first.minutes >= 1440 ? appText("\(first.minutes / 1440) 天窗口", "\(first.minutes / 1440)-day window") : appText("\(first.minutes / 60) 小时窗口", "\(first.minutes / 60)-hour window")
+            let resetTime = formatted(Date(timeIntervalSince1970: Double(first.resetAt)), full: true)
+            quotaNote.stringValue = duration + (first.resetAt > 0 ?
+                appText(" · " + resetTime + " 重置", " · Resets " + resetTime) : "")
+        } else { quotaNote.stringValue = appText("等待 Codex 数据", "Waiting for Codex data") }
+        resetLabel.stringValue = engine.latest?.resets.map { appText("\($0.availableCount) 张", "\($0.availableCount)") } ?? "—"
         if let resets = engine.latest?.resets {
             let dates = resets.credits?.filter { $0.status == "available" }.compactMap(\.expiresAt).sorted() ?? []
             if let next = dates.first {
-                nextExpiryLabel.stringValue = "\(resets.complete ? "最近" : "最近已知") " + formatted(Date(timeIntervalSince1970: Double(next)), full: true) + " 到期"
+                let prefix = resets.complete ? appText("最近", "Next expiry") : appText("最近已知", "Last known expiry")
+                let time = formatted(Date(timeIntervalSince1970: Double(next)), full: true)
+                nextExpiryLabel.stringValue = appText(prefix + " " + time + " 到期", prefix + " · " + time)
                 let remaining = Double(next) - Date().timeIntervalSince1970
                 nextExpiryLabel.textColor = remaining <= 86400 ? .systemRed : remaining <= 3 * 86400 ? .systemOrange : .labelColor
-                expiryLabel.stringValue = dates.dropFirst().prefix(2).map { formatted(Date(timeIntervalSince1970: Double($0)), full: true) + " 到期" }.joined(separator: "\n")
+                expiryLabel.stringValue = dates.dropFirst().prefix(2).map { formatted(Date(timeIntervalSince1970: Double($0)), full: true) + appText(" 到期", " expires") }.joined(separator: "\n")
             } else {
-                nextExpiryLabel.stringValue = resets.availableCount == 0 ? "暂无可用重置卡" : "到期时间暂不可用"
+                nextExpiryLabel.stringValue = resets.availableCount == 0 ? appText("暂无可用重置卡", "No reset cards") : appText("到期时间暂不可用", "Expiry unavailable")
                 nextExpiryLabel.textColor = .secondaryLabelColor; expiryLabel.stringValue = ""
             }
-        } else { nextExpiryLabel.stringValue = "等待同步"; expiryLabel.stringValue = "" }
-        pauseButton.title = engine.paused ? "恢复同步" : "暂停同步"
+        } else { nextExpiryLabel.stringValue = appText("等待同步", "Waiting for sync"); expiryLabel.stringValue = "" }
+        pauseButton.title = engine.paused ? appText("恢复同步", "Resume Sync") : appText("暂停同步", "Pause Sync")
         syncButton.isEnabled = engine.connected && !engine.paused
-        loginSwitch.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        let approval = SMAppService.mainApp.status == .requiresApproval ? "请在系统登录项中允许 Passport Sync" : nil
+        loginSwitch?.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        let approval = SMAppService.mainApp.status == .requiresApproval ? appText("请在系统登录项中允许 Passport Sync", "Allow Passport Sync in System Login Items.") : nil
         let hint = engine.connectionHint
         errorLabel.stringValue = hint ?? engine.error ?? approval ?? ""
         errorLabel.textColor = hint == nil ? .systemOrange : .secondaryLabelColor
@@ -287,17 +353,16 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         connectionLabel.stringValue = "● " + connectionLabel.stringValue
         connectionLabel.textColor = engine.connected && !engine.paused ? accent : .secondaryLabelColor
         runtimeLabel.stringValue = "v\(appVersion)  ·  \(sourceCommit.prefix(7))"
-        statusItem?.button?.contentTintColor = engine.connected && !engine.paused ? .labelColor : .secondaryLabelColor
         let local = engine.localTasks.map(String.init) ?? "—"
         if let host = engine.remoteHost {
-            let remote = engine.remoteTasks.map(String.init) ?? (engine.remoteUnavailable ? "未同步" : "—")
+            let remote = engine.remoteTasks.map(String.init) ?? (engine.remoteUnavailable ? appText("未同步", "Unavailable") : "—")
             taskLabel.stringValue = "Mac \(local)  ·  \(host) \(remote)"
         } else {
             taskLabel.stringValue = local
         }
         taskLabel.toolTip = taskLabel.stringValue
         taskLabel.textColor = engine.remoteUnavailable ? .systemOrange : .secondaryLabelColor
-        let tasks = engine.activeTasks.map { " · Codex 进行中 \($0)" } ?? ""
+        let tasks = engine.activeTasks.map { appText(" · Codex 进行中 \($0)", " · Active Codex tasks: \($0)") } ?? ""
         statusItem?.button?.toolTip = "Passport Sync · \(connectionLabel.stringValue) · \(syncLabel.stringValue)" + tasks
         persistDiagnostic()
     }
@@ -326,7 +391,7 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
                 contents.append(Data("\(ISO8601DateFormatter().string(from: Date())) \(line)\n".utf8))
                 try contents.write(to: log, options: .atomic)
             }
-        } catch { errorLabel.stringValue = "诊断记录保存失败：\(error.localizedDescription)" }
+        } catch { errorLabel.stringValue = appText("诊断记录保存失败：\(error.localizedDescription)", "Unable to save diagnostics: \(error.localizedDescription)") }
     }
     private func alert(_ message: String) {
         _ = PassportDialog(title: "Passport Sync", detail: message).run()
@@ -337,7 +402,7 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         do {
             if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() }
             else { try SMAppService.mainApp.register() }
-        } catch { alert("登录启动设置失败：\(error.localizedDescription)") }
+        } catch { alert(appText("登录启动设置失败：\(error.localizedDescription)", "Unable to update login launch: \(error.localizedDescription)")) }
         update()
     }
     @objc private func openLoginSettings() { SMAppService.openSystemSettingsLoginItems() }
@@ -349,31 +414,31 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
     }
     @objc private func editRemoteSource() {
         let field = NSTextField(string: engine.remoteHost ?? "")
-        field.placeholderString = "SSH 别名或主机名"
-        field.setAccessibilityLabel("SSH 别名或主机名")
-        var detail = "填写终端可以免交互连接的 SSH 别名或主机名。留空仅统计这台 Mac。"
-        while PassportDialog(title: "SSH 任务来源", detail: detail, content: field,
-                             confirm: "保存", cancel: "取消").run() {
+        field.placeholderString = appText("SSH 别名或主机名", "SSH alias or hostname")
+        field.setAccessibilityLabel(appText("SSH 别名或主机名", "SSH alias or hostname"))
+        var detail = appText("填写终端可以免交互连接的 SSH 别名或主机名。留空仅统计这台 Mac。", "Enter an SSH alias or hostname that connects without interactive prompts. Leave it empty to count tasks on this Mac.")
+        while PassportDialog(title: appText("SSH 任务来源", "SSH Task Source"), detail: detail, content: field,
+                             confirm: appText("保存", "Save"), cancel: appText("取消", "Cancel")).run() {
             let host = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             if host.isEmpty || isValidSSHHost(host) {
                 engine.setRemoteHost(host.isEmpty ? nil : host)
                 return
             }
-            detail = "请输入 SSH 别名或主机名。用户名、端口和跳板机可在 ~/.ssh/config 配置。"
+            detail = appText("请输入 SSH 别名或主机名。用户名、端口和跳板机可在 ~/.ssh/config 配置。", "Enter an SSH alias or hostname. Configure user, port and jump host in ~/.ssh/config.")
         }
     }
     @objc private func diagnostics() {
-        let details = """
-        版本  \(appVersion) · \(sourceCommit.prefix(7))
-        卡片  \(engine.connection)
-        最近同步  \(formatted(engine.lastSync, full: true))
-        进行中的 Codex 任务  \(taskLabel.stringValue)
-        卡片已确认  \(engine.acknowledgedTasks.map(String.init) ?? "—")
-        完成提醒  \(engine.lastCompletionAcknowledged.map { formatted($0, full: true) } ?? "—")
-        登录启动  \(loginState())
-        \(engine.error ?? "运行正常")
-        """
-        if PassportDialog(title: "运行诊断", detail: details, confirm: "打开日志目录", cancel: "关闭").run() {
+        let details = [
+            (appText("版本", "Version"), "\(appVersion) · \(sourceCommit.prefix(7))"),
+            (appText("卡片", "Device"), engine.connectionTitle),
+            (appText("最近同步", "Last sync"), formatted(engine.lastSync, full: true)),
+            (appText("进行中的 Codex 任务", "Active Codex tasks"), taskLabel.stringValue),
+            (appText("卡片已确认", "Confirmed by device"), engine.acknowledgedTasks.map(String.init) ?? "—"),
+            (appText("完成提醒", "Completion alert"), engine.lastCompletionAcknowledged.map { formatted($0, full: true) } ?? "—"),
+            (appText("登录启动", "Launch at login"), loginState()),
+        ].map { $0.0 + "  " + $0.1 }.joined(separator: "\n") + "\n" +
+            (engine.error ?? appText("运行正常", "Running normally"))
+        if PassportDialog(title: appText("运行诊断", "Sync Diagnostics"), detail: details, confirm: appText("打开日志目录", "Open Logs Folder"), cancel: appText("关闭", "Close")).run() {
             NSWorkspace.shared.open(supportURL)
         }
     }
@@ -381,15 +446,15 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
         do {
             if SMAppService.mainApp.status != .notRegistered { try SMAppService.mainApp.unregister() }
             engine.setPaused(true); persistDiagnostic(stopped: true); NSApp.terminate(nil)
-        } catch { alert("停用失败：\(error.localizedDescription)") }
+        } catch { alert(appText("停用失败：\(error.localizedDescription)", "Unable to disable background sync: \(error.localizedDescription)")) }
     }
     @objc private func uninstall() {
-        let clear = NSButton(checkboxWithTitle: "同时清理本机配对选择、偏好和日志", target: nil, action: nil)
-        guard PassportDialog(title: "卸载 Passport Sync", detail: "停止同步并移除登录启动和应用。",
-                             content: clear, confirm: "卸载", cancel: "取消", destructive: true).run() else { return }
+        let clear = NSButton(checkboxWithTitle: appText("同时清理本机配对选择、偏好和日志", "Also clear local pairing selections, preferences and logs"), target: nil, action: nil)
+        guard PassportDialog(title: appText("卸载 Passport Sync", "Uninstall Passport Sync"), detail: appText("停止同步并移除登录启动和应用。", "Stop sync and remove the application and its login item."),
+                             content: clear, confirm: appText("卸载", "Uninstall"), cancel: appText("取消", "Cancel"), destructive: true).run() else { return }
         do {
             guard Bundle.main.bundleURL.path == "/Applications/Passport Sync.app" else {
-                throw NSError(domain: appIdentifier, code: 2, userInfo: [NSLocalizedDescriptionKey: "请从应用程序目录打开已安装版本再卸载。"])
+                throw NSError(domain: appIdentifier, code: 2, userInfo: [NSLocalizedDescriptionKey: appText("请从应用程序目录打开已安装版本再卸载。", "Open the installed copy in Applications before uninstalling.")])
             }
             if SMAppService.mainApp.status != .notRegistered { try SMAppService.mainApp.unregister() }
             engine.setPaused(true); persistDiagnostic(stopped: true)
@@ -399,7 +464,7 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
                 try FileManager.default.removeItem(at: supportURL)
             }
             NSApp.terminate(nil)
-        } catch { self.alert("卸载未完成：\(error.localizedDescription)") }
+        } catch { self.alert(appText("卸载未完成：\(error.localizedDescription)", "Unable to complete uninstall: \(error.localizedDescription)")) }
     }
     func applicationWillTerminate(_ notification: Notification) {
         if engine != nil { engine.stop() }
@@ -407,19 +472,24 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
 }
 
 @main struct PassportMain {
-    private static func mainMenu() -> NSMenu {
+    static func mainMenu() -> NSMenu {
         let menu = NSMenu()
         let applicationItem = NSMenuItem()
         applicationItem.submenu = NSMenu(title: "Passport Sync")
-        applicationItem.submenu?.addItem(withTitle: "退出 Passport Sync", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let preferences = NSMenuItem(title: appText("应用设置…", "App Settings…"),
+                                     action: #selector(ManagementApp.showAppSettings), keyEquivalent: ",")
+        preferences.target = NSApp.delegate
+        applicationItem.submenu?.addItem(preferences)
+        applicationItem.submenu?.addItem(.separator())
+        applicationItem.submenu?.addItem(withTitle: appText("退出 Passport Sync", "Quit Passport Sync"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(applicationItem)
 
         // AppKit dispatches editing shortcuts through the menu to the first responder, including modal fields.
-        let edit = NSMenu(title: "编辑")
-        edit.addItem(withTitle: "剪切", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        edit.addItem(withTitle: "复制", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        edit.addItem(withTitle: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        edit.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let edit = NSMenu(title: appText("编辑", "Edit"))
+        edit.addItem(withTitle: appText("剪切", "Cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: appText("复制", "Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: appText("粘贴", "Paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: appText("全选", "Select All"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         let editItem = NSMenuItem()
         editItem.submenu = edit
         menu.addItem(editItem)
@@ -428,7 +498,7 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
 
     static func main() throws {
         let args = CommandLine.arguments
-        if args.contains("--self-test") { try testQuotaData(); return }
+        if args.contains("--self-test") { testAppLanguage(); try testQuotaData(); return }
         if args.count == 3 && args[1] == "--check-codex" {
             let data = try readLimits(codex: args[2])
             print("Codex: \(data.windows.filter { $0.minutes > 0 }.count) window(s), resets: \(data.resets.map { String($0.availableCount) } ?? "unknown")")
@@ -457,7 +527,7 @@ final class ManagementApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NS
             return
         }
         let app = NSApplication.shared; let delegate = ManagementApp()
-        app.setActivationPolicy(.accessory); app.mainMenu = mainMenu(); app.delegate = delegate
+        app.setActivationPolicy(.accessory); app.delegate = delegate; app.mainMenu = mainMenu()
         withExtendedLifetime(delegate) { app.run() }
     }
 }

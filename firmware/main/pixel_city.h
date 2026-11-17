@@ -9,5 +9,6 @@ typedef struct {
     int lighting;
 } pixel_city_t;
 
+bool pixel_city_install_decoder(void);
 void pixel_city_init(pixel_city_t *city, lv_obj_t *parent, pixel_scene_t scene);
 void pixel_city_update(pixel_city_t *city, int hour, uint32_t elapsed_ms);

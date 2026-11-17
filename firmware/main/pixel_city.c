@@ -1,23 +1,112 @@
 #include "pixel_city.h"
 #include "passport.h"
 
-extern const uint8_t art[] asm("_binary_pixel_city_rgb565_start");
-extern const uint8_t scenes_art[] asm("_binary_pixel_scenes_rgb565_start");
-#define CITY_IMAGE(offset) { \
-    .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_RGB565, \
-                .w = WIDTH, .h = HEIGHT, .stride = WIDTH * 2 }, \
-    .data = art + (offset) * PHOTO_BYTES, .data_size = PHOTO_BYTES, \
+#include <string.h>
+#include "src/draw/lv_image_decoder_private.h"
+
+extern const uint8_t art[] asm("_binary_pixel_city_rle_start");
+enum { LIGHTS = 3, BAND_ROWS = 4 };
+static lv_image_dsc_t backgrounds[PIXEL_SCENE_COUNT][LIGHTS];
+static lv_draw_buf_t band;
+static _Alignas(16) uint16_t band_pixels[WIDTH * BAND_ROWS];
+static const uint8_t *band_source;
+static int band_y;
+
+static uint16_t read_le16(const uint8_t *p)
+{
+    return p[0] | (uint16_t)p[1] << 8;
 }
-#define SCENE_IMAGE(offset) { \
-    .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_RGB565, \
-                .w = WIDTH / 2, .h = HEIGHT / 2, .stride = WIDTH }, \
-    .data = scenes_art + (offset) * (PHOTO_BYTES / 4), .data_size = PHOTO_BYTES / 4, \
+
+static uint32_t art_offset(unsigned index)
+{
+    const uint8_t *p = art + index * 4;
+    return read_le16(p) | (uint32_t)read_le16(p + 2) << 16;
 }
-static const lv_image_dsc_t backgrounds[PIXEL_SCENE_COUNT][3] = {
-    [PIXEL_STREET] = {CITY_IMAGE(0), CITY_IMAGE(1), CITY_IMAGE(2)},
-    [PIXEL_PARK] = {SCENE_IMAGE(0), SCENE_IMAGE(1), SCENE_IMAGE(2)},
-    [PIXEL_HARBOR] = {SCENE_IMAGE(3), SCENE_IMAGE(4), SCENE_IMAGE(5)},
-};
+
+static lv_result_t scene_info(lv_image_decoder_t *decoder, lv_image_decoder_dsc_t *dsc,
+                              lv_image_header_t *header)
+{
+    (void)decoder;
+    if (dsc->src_type != LV_IMAGE_SRC_VARIABLE) return LV_RESULT_INVALID;
+    for (unsigned scene = 0; scene < PIXEL_SCENE_COUNT; ++scene) {
+        for (unsigned light = 0; light < LIGHTS; ++light) {
+            const lv_image_dsc_t *image = &backgrounds[scene][light];
+            if (dsc->src != image) continue;
+            *header = image->header;
+            header->cf = LV_COLOR_FORMAT_RGB565;
+            return LV_RESULT_OK;
+        }
+    }
+    return LV_RESULT_INVALID;
+}
+
+static lv_result_t scene_open(lv_image_decoder_t *decoder, lv_image_decoder_dsc_t *dsc)
+{
+    (void)decoder;
+    (void)dsc;
+    return LV_RESULT_OK;
+}
+
+static void decode_row(const uint8_t *image, unsigned y, uint16_t *out)
+{
+    // The generator validates all rows before embedding the atlas in flash.
+    const uint8_t *run = image + read_le16(image + y * 2);
+    if (!*run) {
+        memcpy(out, run + 1, WIDTH * sizeof(*out));
+        return;
+    }
+    uint16_t *end = out + WIDTH;
+    while (out < end) {
+        unsigned count = *run++;
+        uint16_t color = read_le16(run);
+        run += 2;
+        while (count--) *out++ = color;
+    }
+}
+
+static lv_result_t scene_area(lv_image_decoder_t *decoder, lv_image_decoder_dsc_t *dsc,
+                              const lv_area_t *requested, lv_area_t *decoded)
+{
+    (void)decoder;
+    const lv_image_dsc_t *image = dsc->src;
+    int y = decoded->y1 == LV_COORD_MIN ? requested->y1 : decoded->y2 + 1;
+    if (y < 0 || y >= HEIGHT || y > requested->y2) return LV_RESULT_INVALID;
+    int first = y / BAND_ROWS * BAND_ROWS;
+    if (band_source != image->data || band_y != first) {
+        for (int row = 0; row < BAND_ROWS; ++row)
+            decode_row(image->data, first + row, band_pixels + row * WIDTH);
+        band_source = image->data;
+        band_y = first;
+    }
+    *decoded = (lv_area_t){0, first, WIDTH - 1, first + BAND_ROWS - 1};
+    dsc->decoded = &band;
+    return LV_RESULT_OK;
+}
+
+bool pixel_city_install_decoder(void)
+{
+    _Static_assert(HEIGHT % BAND_ROWS == 0, "Bands must fit the screen");
+    if (lv_draw_buf_init(&band, WIDTH, BAND_ROWS, LV_COLOR_FORMAT_RGB565,
+                         WIDTH * 2, band_pixels, sizeof band_pixels) != LV_RESULT_OK) return false;
+    for (unsigned scene = 0; scene < PIXEL_SCENE_COUNT; ++scene) {
+        for (unsigned light = 0; light < LIGHTS; ++light) {
+            unsigned index = scene * LIGHTS + light;
+            uint32_t start = art_offset(index);
+            backgrounds[scene][light] = (lv_image_dsc_t){
+                .header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_RAW_ALPHA,
+                           .w = WIDTH, .h = HEIGHT, .stride = WIDTH * 2},
+                .data = art + start, .data_size = art_offset(index + 1) - start,
+            };
+        }
+    }
+    lv_image_decoder_t *decoder = lv_image_decoder_create();
+    if (!decoder) return false;
+    decoder->name = "Passport pixel scenes";
+    lv_image_decoder_set_info_cb(decoder, scene_info);
+    lv_image_decoder_set_open_cb(decoder, scene_open);
+    lv_image_decoder_set_get_area_cb(decoder, scene_area);
+    return true;
+}
 
 typedef struct { int x, y, w, h; uint32_t color; } pixel_rect_t;
 
@@ -142,11 +231,6 @@ void pixel_city_init(pixel_city_t *city, lv_obj_t *parent, pixel_scene_t scene)
 {
     *city = (pixel_city_t){.scene = scene, .lighting = -1};
     city->background = lv_image_create(parent);
-    if (scene != PIXEL_STREET) {
-        lv_image_set_pivot(city->background, 0, 0);
-        lv_image_set_scale(city->background, 512);
-        lv_image_set_antialias(city->background, false);
-    }
     for (size_t i = 0; i < sizeof(city->actors) / sizeof(*city->actors); ++i) {
         const actor_t actor = actors[scene][i];
         if (actor.width) city->actors[i] = sprite(parent, actor.kind, actor.width, actor.height);

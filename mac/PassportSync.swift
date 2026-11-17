@@ -52,17 +52,33 @@ final class PassportSync: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
     private(set) var connected = false
     private(set) var paused = UserDefaults.standard.bool(forKey: "syncPaused")
     private(set) var connection = "正在启动"
+    var connectionTitle: String {
+        switch connection {
+        case "正在启动": return appText(connection, "Starting")
+        case "已暂停": return appText(connection, "Paused")
+        case "蓝牙未授权": return appText(connection, "Bluetooth permission required")
+        case "蓝牙已关闭": return appText(connection, "Bluetooth off")
+        case "蓝牙不可用": return appText(connection, "Bluetooth unavailable")
+        case "蓝牙准备中": return appText(connection, "Bluetooth starting")
+        case "等待设备": return appText(connection, "Waiting for device")
+        case "正在连接": return appText(connection, "Connecting")
+        case "正在验证配对": return appText(connection, "Pairing")
+        case "已连接": return appText(connection, "Connected")
+        default: return connection
+        }
+    }
     var connectionHint: String? {
         guard !paused else { return nil }
         switch connection {
-        case "蓝牙未授权": return "在 Mac 的「系统设置 → 隐私与安全性 → 蓝牙」中允许 Passport Sync。"
-        case "蓝牙已关闭": return "打开 Mac 蓝牙，再确认卡片的蓝牙开关已开启。"
-        case "等待设备": return "在卡片长按确认，进入「连接 → Mac 蓝牙 → 配对 Mac」。"
-        case "正在验证配对": return "Mac 请求配对码时，输入卡片屏幕上的六位数字。"
+        case "蓝牙未授权": return appText("在 Mac 的「系统设置 → 隐私与安全性 → 蓝牙」中允许 Passport Sync。", "Allow Passport Sync in System Settings → Privacy & Security → Bluetooth.")
+        case "蓝牙已关闭": return appText("打开这台 Mac 的蓝牙，再确认卡片的蓝牙开关已开启。", "Turn on Bluetooth on this Mac and your Passport.")
+        case "等待设备": return appText("在卡片长按确认，进入「连接 → 蓝牙同步 → 开始配对」。", "On your Passport, hold OK, then select Start pairing under Connections → Bluetooth Sync.")
+        case "正在验证配对": return appText("Mac 请求配对码时，输入卡片屏幕上的六位数字。", "When macOS requests a pairing code, enter the six digits on your Passport.")
         default: return nil
         }
     }
-    private(set) var error: String?
+    private var issue: (String, String)?
+    var error: String? { issue.map { appText($0.0, $0.1) } }
     private(set) var lastRead: Date?
     private(set) var lastSync: Date?
     private(set) var latest: QuotaData?
@@ -160,7 +176,7 @@ final class PassportSync: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
     private func reconnect(_ peripheral: CBPeripheral, error: Error?) {
         guard device === peripheral else { return }
         generation += 1; clearConnection(); connection = paused ? "已暂停" : "等待设备"
-        if let error { self.error = "蓝牙：\(error.localizedDescription)" }
+        if let error { self.issue = ("蓝牙：\(error.localizedDescription)", "Bluetooth: \(error.localizedDescription)") }
         changed?()
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in self?.scan() }
     }
@@ -172,7 +188,7 @@ final class PassportSync: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
     }
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard let service = peripheral.services?.first(where: { $0.uuid == serviceID }) else {
-            self.error = "设备服务读取失败"; changed?(); central.cancelPeripheralConnection(peripheral); return
+            self.issue = ("设备服务读取失败", "Unable to read the device service"); changed?(); central.cancelPeripheralConnection(peripheral); return
         }
         peripheral.discoverCharacteristics([dataID], for: service)
     }
@@ -195,7 +211,7 @@ final class PassportSync: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
         DispatchQueue.main.asyncAfter(deadline: .now() + 125) { [weak self, weak device] in
             guard let self, let device, self.device === device,
                   self.writeSequence == sequence, self.writeInFlight else { return }
-            self.error = "设备确认超时"; self.changed?(); self.central.cancelPeripheralConnection(device)
+            self.issue = ("设备确认超时", "The device did not respond in time"); self.changed?(); self.central.cancelPeripheralConnection(device)
         }
     }
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
@@ -213,13 +229,13 @@ final class PassportSync: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
             if write.kind == .resets && resetMessageUnsupported(error) {
                 resetsUnsupported = true
             } else {
-                self.error = "同步失败：\(error.localizedDescription)"; changed?()
+                self.issue = ("同步失败：\(error.localizedDescription)", "Sync failed: \(error.localizedDescription)"); changed?()
                 central.cancelPeripheralConnection(peripheral); return
             }
         }
         writes.removeFirst(); writeInFlight = false
         if firstWrite {
-            firstWrite = false; connected = true; connection = "已连接"; self.error = nil
+            firstWrite = false; connected = true; connection = "已连接"; self.issue = nil
             if selectedDevice == nil { UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: "passportDevice") }
             changed?(); refresh(); refreshTasks(); refreshRemoteTasks()
         } else if write.kind == .status {
@@ -227,7 +243,7 @@ final class PassportSync: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
             if (write.data[1] & 4) != 0 { lastCompletionAcknowledged = Date() }
             changed?()
         } else if write.kind == .resets || (write.kind == .quota && !writes.contains(where: { $0.kind == .resets })) {
-            lastSync = Date(); self.error = resetsUnsupported ? "请更新卡片固件以显示重置卡" : nil; changed?()
+            lastSync = Date(); self.issue = resetsUnsupported ? ("请更新卡片固件以显示重置卡", "Update Passport firmware to display reset cards") : nil; changed?()
         }
         writeNext()
     }
@@ -306,7 +322,7 @@ final class PassportSync: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
                     self.publishStatus()
                 case .failure(let error):
                     self.quotaFailed = true
-                    self.error = "Codex 读取失败：\(error.localizedDescription)"
+                    self.issue = ("Codex 读取失败：\(error.localizedDescription)", "Unable to read Codex data: \(error.localizedDescription)")
                     self.publishStatus()
                 }
                 self.changed?()

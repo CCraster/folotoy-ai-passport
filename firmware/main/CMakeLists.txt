@@ -5,7 +5,7 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES bsp nvs_flash esp_partition esp_http_server esp_wifi esp_event esp_netif bt json esp_timer esp_pm esp_lcd app_update bootloader_support spi_flash
     EMBED_TXTFILES "unlock.html"
-    EMBED_FILES "art/pixel_city.rgb565" "art/pixel_scenes.rgb565"
+    EMBED_FILES "art/pixel_city.rle"
 )
 
 # 栈溢出不由主机 ASan 覆盖；保留目标编译器的每函数栈报告供构建门禁检查。

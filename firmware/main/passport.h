@@ -49,6 +49,13 @@ typedef struct {
 } passport_preferences_t;
 
 enum { POWER_DESKTOP, POWER_PORTABLE };
+typedef enum { PASSPORT_ZH, PASSPORT_EN } passport_language_t;
+passport_language_t passport_language(void);
+esp_err_t save_language(passport_language_t language);
+static inline const char *ui_text(const char *zh, const char *en)
+{
+    return passport_language() == PASSPORT_EN ? en : zh;
+}
 // 这些值参与页面记忆。显示顺序独立于存储编号。
 enum { BADGE, PHOTO, QUOTA, SETTINGS, CITY, GAME };
 typedef enum { PIXEL_STREET, PIXEL_PARK, PIXEL_HARBOR, PIXEL_SCENE_COUNT } pixel_scene_t;

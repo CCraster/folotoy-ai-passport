@@ -5,9 +5,9 @@ enum ReadError: LocalizedError {
     case protocolError, unavailable, cancelled
     var errorDescription: String? {
         switch self {
-        case .protocolError: return "返回数据格式不符合协议"
-        case .unavailable: return "账号额度暂不可用，请检查 Codex 登录与网络"
-        case .cancelled: return "查询已取消"
+        case .protocolError: return appText("返回数据格式不符合协议", "The response does not match the protocol")
+        case .unavailable: return appText("账号额度暂不可用，请检查 Codex 登录与网络", "Quota is unavailable. Check your Codex sign-in and connection.")
+        case .cancelled: return appText("查询已取消", "Query canceled")
         }
     }
 }

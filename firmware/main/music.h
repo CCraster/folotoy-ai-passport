@@ -15,8 +15,9 @@ typedef struct {
 } boot_music_config_t;
 
 typedef struct { bool enabled; uint8_t selection; bool has_custom; } boot_music_status_t;
-typedef struct { const char *name; const char *rtttl; } music_preset_t;
+typedef struct { const char *name; const char *rtttl; const char *english_name; } music_preset_t;
 extern const music_preset_t music_presets[MUSIC_PRESET_COUNT];
+const char *music_preset_name(unsigned selection);
 
 esp_err_t music_init(uint8_t volume);
 boot_music_config_t music_config(void);

@@ -27,6 +27,7 @@ test:
 		-I firmware/main tests/test_web_peer.c firmware/main/web_peer.c -o .agent/local/tests/web-peer
 	.agent/local/tests/web-peer
 	node tests/test_web_transport.mjs
+	node tools/pixel_city_art.mjs --check
 	$(CC) -std=c11 -Wall -Wextra -Werror -Wno-unused-parameter -fsanitize=address,undefined \
 		-I tests/network_stubs -I tests/stubs -I firmware/main tests/test_network.c -o .agent/local/tests/network
 	.agent/local/tests/network

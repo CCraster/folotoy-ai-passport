@@ -2,18 +2,34 @@ import AppKit
 import WebKit
 import UniformTypeIdentifiers
 
-// 两端运行卡片提供的同一套备份校验与恢复流程；Mac 使用系统文件对话框。
+// 复用卡片的配置网页，文件打开与保存由 macOS 原生面板处理。
 final class BackupWindow: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, NSWindowDelegate {
+    enum Destination {
+        case setup, backup
+
+        var title: String {
+            switch self {
+            case .setup: return appText("设备配置", "Device Setup")
+            case .backup: return appText("备份与恢复", "Backup & Restore")
+            }
+        }
+    }
+
     let window: NSWindow
+    private var destination: Destination
+    private let heading = PassportUI.label("", size: 18, color: .labelColor, weight: .semibold)
     private let address: URL
     private let web: WKWebView
     var closed: (() -> Void)?
 
-    static func requestAddress() -> URL? {
-        var detail = "在卡片打开「设置 → 连接 → 网页设置」，输入屏幕上的网址。临时热点模式下，请先让 Mac 加入卡片热点。"
+    static func requestAddress(_ destination: Destination) -> URL? {
+        var detail = appText(
+            "请让 Mac 和卡片连接同一局域网。在卡片进入「设置 → 连接 → 设备配置」，输入屏幕上的网址和访问码。也可以让 Mac 加入卡片的临时热点。",
+            "Connect your Mac and Passport to the same network. On the Passport, open Settings → Connections → Device Setup, then enter the URL and access code shown there. You can also join the Passport hotspot on this Mac.")
         let entry = NSTextField(string: "")
-        entry.placeholderString = "例如 http://192.168.4.1"
-        while PassportDialog(title: "资料备份", detail: detail, content: entry, confirm: "打开", cancel: "取消").run() {
+        entry.placeholderString = appText("例如 http://192.168.1.10", "For example, http://192.168.1.10")
+        while PassportDialog(title: destination.title, detail: detail, content: entry,
+                             confirm: appText("打开", "Open"), cancel: appText("取消", "Cancel")).run() {
             let value = entry.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             let url = URLComponents(string: value.contains("://") ? value : "http://" + value)
             if let url, url.scheme == "http", let host = url.host,
@@ -22,7 +38,7 @@ final class BackupWindow: NSObject, WKNavigationDelegate, WKUIDelegate, WKScript
                 return url.url
             }
             entry.removeFromSuperview()
-            detail = "请输入卡片屏幕上显示的局域网 IPv4 网址。"
+            detail = appText("请输入卡片屏幕上显示的局域网 IPv4 网址。", "Enter the local IPv4 address shown on your Passport.")
         }
         return nil
     }
@@ -35,8 +51,9 @@ final class BackupWindow: NSObject, WKNavigationDelegate, WKUIDelegate, WKScript
             || (octets[0] == 169 && octets[1] == 254)
     }
 
-    init(address: URL) {
+    init(address: URL, destination: Destination) {
         self.address = address
+        self.destination = destination
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
         web = WKWebView(frame: .zero, configuration: config)
@@ -46,10 +63,9 @@ final class BackupWindow: NSObject, WKNavigationDelegate, WKUIDelegate, WKScript
         web.navigationDelegate = self
         web.uiDelegate = self
         web.configuration.userContentController.add(self, name: "passportBackup")
-        window.title = "Passport · 资料备份"
+        updateTitle()
         PassportUI.style(window)
         let root = window.contentView!
-        let heading = PassportUI.label("资料备份", size: 18, color: .labelColor, weight: .semibold)
         let header = PassportUI.card([heading], inset: 12)
         let stack = PassportUI.column([header, web], spacing: 12)
         header.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -59,7 +75,38 @@ final class BackupWindow: NSObject, WKNavigationDelegate, WKUIDelegate, WKScript
         window.delegate = self
         window.isReleasedWhenClosed = false
         window.center()
-        web.load(URLRequest(url: address, timeoutInterval: 15))
+        openAddress()
+    }
+
+    private func openAddress() {
+        var parts = URLComponents(url: address, resolvingAgainstBaseURL: false)!
+        parts.fragment = "locale=\(AppLanguage.saved().locale())"
+        guard let url = parts.url else { return }
+        web.load(URLRequest(url: url, timeoutInterval: 15))
+    }
+
+    private func updateTitle() {
+        heading.stringValue = destination.title
+        window.title = "Passport · " + destination.title
+    }
+
+    func show(_ destination: Destination) {
+        self.destination = destination
+        updateTitle()
+        showDestination()
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    func refreshLanguage() {
+        updateTitle()
+        let locale = AppLanguage.saved().locale()
+        if web.url == nil { openAddress(); return }
+        web.evaluateJavaScript("""
+            const locator = new URLSearchParams(location.hash.slice(1));
+            locator.set('locale', '\(locale)');
+            location.hash = locator.toString();
+            location.reload();
+            """, completionHandler: nil)
     }
 
     private func isCard(_ url: URL?) -> Bool {
@@ -71,20 +118,31 @@ final class BackupWindow: NSObject, WKNavigationDelegate, WKUIDelegate, WKScript
         decisionHandler(isCard(action.request.url) && action.targetFrame?.isMainFrame == true ? .allow : .cancel)
     }
 
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        webView.evaluateJavaScript("""
-            if (document.getElementById('openBackup')) {
-                document.getElementById('navDevice').click();
-                document.getElementById('openBackup').click();
-            }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { showDestination() }
+
+    private func showDestination() {
+        web.evaluateJavaScript("""
+            Promise.resolve(typeof passportLanguageReady === 'undefined' ? null : passportLanguageReady).then(() => {
+                const dialog = document.getElementById('backupDialog');
+                if (!dialog) return;
+                if (\(destination == .backup)) {
+                    document.getElementById('navDevice').click();
+                    if (!dialog.open) document.getElementById('openBackup').click();
+                } else if (dialog.open) {
+                    dialog.close();
+                }
+            });
+            void 0;
             """, completionHandler: nil)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        let dialog = PassportDialog(title: "暂时无法打开卡片",
-            detail: "请确认 Mac 与卡片在同一网络，且机身的网页设置还开着。",
-            confirm: "重试", cancel: "关闭")
-        if dialog.run() { web.load(URLRequest(url: address, timeoutInterval: 15)) }
+        if (error as NSError).code == NSURLErrorCancelled { return }
+        let dialog = PassportDialog(title: appText("暂时无法打开卡片", "Cannot Open Passport"),
+            detail: appText("请确认 Mac 与卡片在同一网络，且机身的设备配置还开着。",
+                            "Check that both devices are on the same network and Device Setup is still open on the Passport."),
+            confirm: appText("重试", "Retry"), cancel: appText("关闭", "Close"))
+        if dialog.run() { openAddress() }
         else { window.close() }
     }
 
@@ -92,9 +150,17 @@ final class BackupWindow: NSObject, WKNavigationDelegate, WKUIDelegate, WKScript
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
         guard frame.isMainFrame, isCard(frame.request.url) else { completionHandler(nil); return }
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.canChooseDirectories = parameters.allowsDirectories
         panel.beginSheetModal(for: window) { response in completionHandler(response == .OK ? panel.urls : nil) }
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        guard frame.isMainFrame, isCard(frame.request.url) else { completionHandler(false); return }
+        let dialog = PassportDialog(title: destination.title, detail: message,
+                                    confirm: appText("确认", "Confirm"), cancel: appText("取消", "Cancel"))
+        completionHandler(dialog.run())
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -108,17 +174,17 @@ final class BackupWindow: NSObject, WKNavigationDelegate, WKUIDelegate, WKScript
         panel.nameFieldStringValue = filename
         panel.beginSheetModal(for: window) { [weak self] result in
             guard let self else { return }
-            var status = "已取消导出"
+            var status = ("已取消导出", "Export canceled.")
             if result == .OK, let url = panel.url {
                 do {
                     try Data(contents.utf8).write(to: url, options: .atomic)
-                    status = "备份已保存在 Mac"
+                    status = ("备份已保存在 Mac", "Backup saved on this Mac.")
                 } catch {
-                    status = "备份保存失败，请选择可写的位置"
+                    status = ("备份保存失败，请选择可写的位置", "Unable to save the backup. Choose a writable folder.")
                 }
             }
             // 状态只来自上面定义的固定短句。
-            self.web.evaluateJavaScript("document.getElementById('backupResult').textContent = '\(status)';", completionHandler: nil)
+            self.web.evaluateJavaScript("document.getElementById('backupResult').textContent = document.documentElement.lang === 'en' ? '\(status.1)' : '\(status.0)';", completionHandler: nil)
         }
     }
 

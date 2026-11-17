@@ -85,8 +85,15 @@ esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key, const void *data, s
     return ESP_OK;
 }
 esp_err_t nvs_commit(nvs_handle_t handle) { return commit_error; }
+static uint8_t stored_language;
+static bool language_exists;
 esp_err_t nvs_get_u8(nvs_handle_t handle, const char *key, uint8_t *out)
-{ if (handle == 1 && !strcmp(key, "meow_tutorial")) {
+{ if (handle == 1 && !strcmp(key, "language")) {
+      if (!language_exists) return ESP_ERR_NVS_NOT_FOUND;
+      *out = stored_language;
+      return ESP_OK;
+  }
+  if (handle == 1 && !strcmp(key, "meow_tutorial")) {
       if (!tutorial_done) return ESP_ERR_NVS_NOT_FOUND;
       *out = 1;
       return ESP_OK;
@@ -94,7 +101,11 @@ esp_err_t nvs_get_u8(nvs_handle_t handle, const char *key, uint8_t *out)
   if (handle==1 && !strcmp(key,"ble_off")) { if(!ble_exists)return ESP_ERR_NVS_NOT_FOUND; *out=ble_flag;return ESP_OK; }
   assert(handle == 2 && !strcmp(key, "pending")); if (!pending_exists) return ESP_ERR_NVS_NOT_FOUND; *out = pending_action; return ESP_OK; }
 esp_err_t nvs_set_u8(nvs_handle_t handle, const char *key, uint8_t value)
-{ if (handle == 1 && !strcmp(key, "meow_tutorial")) {
+{ if (handle == 1 && !strcmp(key, "language")) {
+      if (!commit_error) { stored_language = value; language_exists = true; }
+      return ESP_OK;
+  }
+  if (handle == 1 && !strcmp(key, "meow_tutorial")) {
       assert(value == 1);
       if (!commit_error) tutorial_done = true;
       return ESP_OK;
@@ -155,9 +166,11 @@ int httpd_req_recv(httpd_req_t *req, char *out, size_t size)
 bool detach_display_asset(const uint8_t *pixels) { return true; }
 const char *esp_err_to_name(int err) { return "test error"; }
 
-bool photo_jpeg_valid(const uint8_t *data, size_t size)
+static esp_err_t jpeg_upload_error;
+
+esp_err_t photo_jpeg_validate_upload(const uint8_t *data, size_t size)
 {
-    return size == 80 && data[0] != 0;
+    return size == 80 && data[0] != 0 ? jpeg_upload_error : ESP_ERR_INVALID_ARG;
 }
 
 size_t photo_jpeg_from_rgb565(const uint8_t *pixels, uint8_t *jpeg)
@@ -208,6 +221,10 @@ static void test_photo_album(void)
     upload_at = 0;
     upload_length = 80;
     assert(receive_photo(&req, 0, crc ^ 1) == ESP_ERR_INVALID_CRC);
+    upload_at = 0;
+    jpeg_upload_error = ESP_ERR_NO_MEM;
+    assert(receive_photo(&req, 0, crc) == ESP_ERR_NO_MEM);
+    jpeg_upload_error = ESP_OK;
     upload_at = 0;
     upload[0] = 0;
     assert(receive_photo(&req, 0, esp_rom_crc32_le(0, upload, 80)) == ESP_ERR_INVALID_ARG);
@@ -351,5 +368,13 @@ int main(void)
     assert(resume_maintenance() == ESP_OK && erased_assets == 1);
     assert(schedule_maintenance(9) == ESP_ERR_INVALID_ARG);
     test_photo_album();
+    assert(passport_language() == PASSPORT_ZH);
+    assert(save_language(PASSPORT_EN) == ESP_OK);
+    assert(storage_init() == ESP_OK && passport_language() == PASSPORT_EN);
+    commit_error = ESP_FAIL;
+    assert(save_language(PASSPORT_ZH) == ESP_FAIL && passport_language() == PASSPORT_EN);
+    commit_error = ESP_OK;
+    assert(save_language(PASSPORT_ZH) == ESP_OK);
+    assert(storage_init() == ESP_OK && passport_language() == PASSPORT_ZH);
     puts("Storage tests passed: preferences, reset and photo album migration, cycling and safe replacement.");
 }

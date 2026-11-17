@@ -26,6 +26,7 @@ static nvs_handle_t operations;
 
 passport_profile_t profile;
 static photo_album_t saved_album;
+static passport_language_t saved_language;
 static passport_preferences_t saved_preferences = {.brightness = 70, .volume = 40, .sleep_seconds = 60, .deep_sleep_seconds = 300};
 
 _Static_assert(offsetof(passport_preferences_t, deep_sleep_seconds) == 8, "Keep legacy preference offsets");
@@ -193,6 +194,11 @@ esp_err_t storage_init(void)
     // A separate namespace leaves the original firmware's NVS entries available.
     err = nvs_open("passport_v1", NVS_READWRITE, &settings);
     if (err != ESP_OK) return err;
+    // 独立键保留旧版 preferences 的二进制布局。
+    uint8_t language = PASSPORT_ZH;
+    err = nvs_get_u8(settings, "language", &language);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) return err;
+    saved_language = language == PASSPORT_EN ? PASSPORT_EN : PASSPORT_ZH;
     size_t size = sizeof profile;
     err = nvs_get_blob(settings, "profile", &profile, &size);
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) return err;
@@ -224,6 +230,32 @@ static esp_err_t store_blob(const char *key, const void *data, size_t size)
 {
     esp_err_t err = nvs_set_blob(settings, key, data, size);
     return err == ESP_OK ? nvs_commit(settings) : err;
+}
+
+passport_language_t passport_language(void)
+{
+    portENTER_CRITICAL(&state_lock);
+    passport_language_t language = saved_language;
+    portEXIT_CRITICAL(&state_lock);
+    return language;
+}
+
+esp_err_t save_language(passport_language_t language)
+{
+    if (language != PASSPORT_ZH && language != PASSPORT_EN) return ESP_ERR_INVALID_ARG;
+    xSemaphoreTake(settings_lock, portMAX_DELAY);
+    esp_err_t err = ESP_OK;
+    if (language != passport_language()) {
+        err = nvs_set_u8(settings, "language", language);
+        if (err == ESP_OK) err = nvs_commit(settings);
+        if (err == ESP_OK) {
+            portENTER_CRITICAL(&state_lock);
+            saved_language = language;
+            portEXIT_CRITICAL(&state_lock);
+        }
+    }
+    xSemaphoreGive(settings_lock);
+    return err;
 }
 
 passport_preferences_t preferences_snapshot(void)
@@ -510,8 +542,11 @@ static esp_err_t write_asset(httpd_req_t *req, bool photo, uint8_t slot, uint32_
         if (err != ESP_OK) return err;
         received += count;
     }
-    if (crc != checksum || esp_rom_crc32_le(0, asset_data(photo, slot), length) != checksum)
-        return ESP_ERR_INVALID_CRC;
+    const uint32_t readback = photo || crc == checksum
+        ? esp_rom_crc32_le(0, asset_data(photo, slot), length) : 0;
+    if (photo) ESP_LOGI("photo_diag", "crc received_ok=%d readback_ok=%d",
+                        crc == checksum, readback == checksum);
+    if (crc != checksum || readback != checksum) return ESP_ERR_INVALID_CRC;
     return ESP_OK;
 }
 
@@ -523,10 +558,11 @@ esp_err_t receive_photo(httpd_req_t *req, unsigned index, uint32_t checksum)
     // HTTP 任务串行修改照片槽位。上传时短按确认仍可换图。
     photo_album_t album = photo_album_snapshot();
     uint8_t slot = free_photo_slot(&album);
-    if (!slot) return ESP_ERR_NO_MEM;
+    if (!slot) return ESP_ERR_INVALID_STATE;
     esp_err_t err = write_asset(req, true, slot, checksum);
     if (err != ESP_OK) return err;
-    if (!photo_jpeg_valid(asset_data(true, slot), size)) return ESP_ERR_INVALID_ARG;
+    err = photo_jpeg_validate_upload(asset_data(true, slot), size);
+    if (err != ESP_OK) return err;
 
     xSemaphoreTake(settings_lock, portMAX_DELAY);
     album = saved_album;

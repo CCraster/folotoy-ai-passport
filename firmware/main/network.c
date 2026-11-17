@@ -23,10 +23,10 @@ static unsigned job; // 1=扫描，2=连接；与 connecting/scanning 在同一�
 static char candidate_ssid[33], candidate_password[65];
 static int64_t connect_deadline;
 
-static void message(const char *text, bool error)
+static void message(network_message_t result, bool error)
 {
     portENTER_CRITICAL(&lock);
-    snprintf(state.message, sizeof state.message, "%s", text);
+    state.message = result;
     state.error = error;
     portEXIT_CRITICAL(&lock);
 }
@@ -72,7 +72,7 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         }
         state.scanning = false;
         portEXIT_CRITICAL(&lock);
-        if (err != ESP_OK) message("扫描失败，请重试", true);
+        if (err != ESP_OK) message(NETWORK_SCAN_FAILED, true);
     }
 }
 
@@ -253,7 +253,7 @@ esp_err_t network_open(bool force_hotspot)
     state.ap_ip = info.ip.addr;
     snprintf(state.ssid, sizeof state.ssid, "%s", ssid);
     snprintf(state.password, sizeof state.password, "%s", password);
-    state.message[0] = 0; state.error = false;
+    state.message = NETWORK_MESSAGE_NONE; state.error = false;
     portEXIT_CRITICAL(&lock);
     // 自动弹页失败时仍能用屏幕上的短网址；DNS 不承担设置数据写入。
     err = portal_start(info.ip.addr);
@@ -265,7 +265,7 @@ esp_err_t network_scan(void)
 {
     portENTER_CRITICAL(&lock);
     bool busy = !state.hotspot || state.connecting || state.scanning;
-    if (!busy) { state.scanning = true; state.message[0] = 0; state.error = false; job = 1; }
+    if (!busy) { state.scanning = true; state.message = NETWORK_MESSAGE_NONE; state.error = false; job = 1; }
     portEXIT_CRITICAL(&lock);
     return busy ? ESP_ERR_INVALID_STATE : ESP_OK;
 }
@@ -279,7 +279,7 @@ esp_err_t network_connect(const char *ssid, const char *password)
         snprintf(candidate_password, sizeof candidate_password, "%s", password);
         state.connecting = trial = true;
         failed = retry_requested = false;
-        state.message[0] = 0; state.error = false;
+        state.message = NETWORK_MESSAGE_NONE; state.error = false;
         job = 2;
     }
     portEXIT_CRITICAL(&lock);
@@ -298,7 +298,7 @@ void network_poll(void)
         esp_err_t err = esp_wifi_scan_start(NULL, false);
         if (err != ESP_OK) {
             portENTER_CRITICAL(&lock); state.scanning = false; portEXIT_CRITICAL(&lock);
-            message("扫描失败，请重试", true);
+            message(NETWORK_SCAN_FAILED, true);
         }
     } else if (next == 2) {
         esp_wifi_disconnect();
@@ -332,10 +332,10 @@ void network_poll(void)
     connect_deadline = 0;
     memset(candidate_password, 0, sizeof candidate_password);
     portEXIT_CRITICAL(&lock);
-    if (success && saved == ESP_OK) message("已连接并保存，可继续编辑", false);
+    if (success && saved == ESP_OK) message(NETWORK_CONNECTED_SAVED, false);
     else {
         esp_wifi_disconnect();
-        message(success ? "保存失败，原网络已保留" : "连接失败，请检查密码和网络后重试", true);
+        message(success ? NETWORK_SAVE_FAILED : NETWORK_CONNECT_FAILED, true);
     }
 }
 

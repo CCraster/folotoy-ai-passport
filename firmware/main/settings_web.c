@@ -50,6 +50,17 @@ static void private_response(httpd_req_t *req)
     httpd_resp_set_hdr(req, "X-Frame-Options", "DENY");
 }
 
+// 内嵌网页可指定自身语言，路由读取设备语言作为默认值。
+static const char *web_text(httpd_req_t *req, const char *zh, const char *en)
+{
+    char locale[6];
+    if (httpd_req_get_hdr_value_str(req, "X-Passport-Language", locale, sizeof locale) == ESP_OK) {
+        if (!strcmp(locale, "en")) return en;
+        if (!strcmp(locale, "zh-CN")) return zh;
+    }
+    return ui_text(zh, en);
+}
+
 static bool has_token(httpd_req_t *req)
 {
     char query[40], supplied[25];
@@ -112,7 +123,7 @@ static bool permitted(httpd_req_t *req)
         return true;
     }
     httpd_resp_set_status(req, "403 Forbidden");
-    httpd_resp_sendstr(req, "设置已关闭，请在卡片上重新打开网页设置");
+    httpd_resp_sendstr(req, web_text(req, "配置已关闭，请在卡片上重新打开设备配置", "Setup has closed. Reopen Device Setup on the Passport."));
     return false;
 }
 
@@ -131,15 +142,41 @@ static esp_err_t page(httpd_req_t *req)
     return send_resource(req, settings_html_start, settings_html_end - settings_html_start, "settings");
 }
 
+static esp_err_t get_language(httpd_req_t *req)
+{
+    private_response(req);
+    return httpd_resp_sendstr(req, ui_text("zh-CN", "en"));
+}
+
+static esp_err_t put_language(httpd_req_t *req)
+{
+    if (!permitted(req)) return ESP_OK;
+    char locale[6];
+    size_t length = req->content_len, received = 0;
+    if (length != 2 && length != 5)
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "语言无效", "Invalid language."));
+    while (received < length) {
+        int n = httpd_req_recv(req, locale + received, length - received);
+        if (n <= 0) return httpd_resp_send_err(req, HTTPD_408_REQ_TIMEOUT, web_text(req, "传输超时", "Transfer timed out."));
+        received += n;
+    }
+    bool english = length == 2 && !memcmp(locale, "en", 2);
+    if (!english && (length != 5 || memcmp(locale, "zh-CN", 5)))
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "语言无效", "Invalid language."));
+    if (save_language(english ? PASSPORT_EN : PASSPORT_ZH) != ESP_OK)
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, web_text(req, "保存失败，请重试", "Unable to save. Try again."));
+    return httpd_resp_sendstr(req, ui_text("zh-CN", "en"));
+}
+
 static esp_err_t unlock(httpd_req_t *req)
 {
     private_response(req);
     if (esp_timer_get_time() < access_code.blocked_until) {
         httpd_resp_set_status(req, "429 Too Many Requests");
-        return httpd_resp_sendstr(req, "尝试过多，请一分钟后重试");
+        return httpd_resp_sendstr(req, web_text(req, "尝试过多，请一分钟后重试", "Too many attempts. Try again in one minute."));
     }
     char body[12] = {0};
-    if (req->content_len != 11) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "请输入六位访问码");
+    if (req->content_len != 11) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "请输入六位访问码", "Enter the six-digit access code."));
     size_t received = 0;
     while (received < 11) {
         int count = httpd_req_recv(req, body + received, 11 - received);
@@ -149,7 +186,7 @@ static esp_err_t unlock(httpd_req_t *req)
     const char *supplied = !strncmp(body, "code=", 5) ? body + 5 : "";
     if (web_code_check(&access_code, supplied, esp_timer_get_time()) != WEB_CODE_OK) {
         httpd_resp_set_status(req, "403 Forbidden");
-        return httpd_resp_sendstr(req, "访问码不正确，请查看卡片屏幕");
+        return httpd_resp_sendstr(req, web_text(req, "访问码不正确，请查看卡片屏幕", "Incorrect code. Check your Passport screen."));
     }
     touch();
     return enter_editor(req);
@@ -212,7 +249,7 @@ static esp_err_t get_asset(httpd_req_t *req)
     uint8_t slot = value.badge;
     if (photo) {
         int index = photo_index(req);
-        if (index < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "照片位置无效");
+        if (index < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "照片位置无效", "Invalid photo slot."));
         slot = photo_album_snapshot().slots[index];
     }
     const uint8_t *pixels = asset_data(photo, slot);
@@ -237,7 +274,7 @@ static esp_err_t get_music(httpd_req_t *req)
     cJSON_AddNumberToObject(result, "volume", music_volume());
     cJSON *presets = cJSON_AddArrayToObject(result, "presets");
     for (size_t i = 0; i < MUSIC_PRESET_COUNT; ++i)
-        cJSON_AddItemToArray(presets, cJSON_CreateString(music_presets[i].name));
+        cJSON_AddItemToArray(presets, cJSON_CreateString(web_text(req, music_presets[i].name, music_presets[i].english_name)));
     char *json = cJSON_PrintUnformatted(result);
     cJSON_Delete(result);
     if (!json) return ESP_ERR_NO_MEM;
@@ -286,8 +323,8 @@ static esp_err_t check_music(httpd_req_t *req)
     boot_music_config_t config = {0};
     music_score_t score;
     if (read_music(req, &config) != ESP_OK || !music_validate(&config, &score))
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "备份的乐谱无效");
-    return httpd_resp_sendstr(req, "乐谱已校验");
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "备份的乐谱无效", "The backup has an invalid melody."));
+    return httpd_resp_sendstr(req, web_text(req, "乐谱已校验", "Melody verified."));
 }
 
 static esp_err_t put_music(httpd_req_t *req)
@@ -298,21 +335,21 @@ static esp_err_t put_music(httpd_req_t *req)
     bool preview = req->user_ctx != NULL;
     if (err == ESP_OK) err = preview ? music_preview(&config) : music_save(&config);
     if (err == ESP_ERR_INVALID_ARG)
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "乐谱无效：支持 4–7 八度、最多 96 个音符、总长 20 秒");
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "乐谱无效：支持 4–7 八度、最多 96 个音符、总长 20 秒", "Invalid melody. Use octaves 4–7, up to 96 notes and 20 seconds."));
     if (err == ESP_ERR_NOT_ALLOWED)
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "当前已静音，请先在卡片上调高音量");
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "当前已静音，请先在卡片上调高音量", "Sound is muted. Turn up the volume on your Passport."));
     if (err != ESP_OK) {
         ESP_LOGE("settings", "Music %s: %s", preview ? "preview" : "save", esp_err_to_name(err));
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, preview ? "暂时无法播放，请重试" : "保存失败，请重试");
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, preview ? web_text(req, "暂时无法播放，请重试", "Unable to play. Try again.") : web_text(req, "保存失败，请重试", "Unable to save. Try again."));
     }
-    return httpd_resp_sendstr(req, preview ? "正在卡片上试听" : "已保存");
+    return httpd_resp_sendstr(req, preview ? web_text(req, "正在卡片上试听", "Playing on your Passport.") : web_text(req, "已保存", "Saved"));
 }
 
 static esp_err_t stop_music(httpd_req_t *req)
 {
     if (!permitted(req)) return ESP_OK;
     music_stop();
-    return httpd_resp_sendstr(req, "已停止");
+    return httpd_resp_sendstr(req, web_text(req, "已停止", "Stopped."));
 }
 
 static esp_err_t get_device(httpd_req_t *req)
@@ -344,14 +381,14 @@ static esp_err_t put_device(httpd_req_t *req)
 {
     if (!permitted(req)) return ESP_OK;
     if (!req->content_len || req->content_len > 256)
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "设置格式有误");
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "设置格式有误", "Invalid settings."));
     char body[257];
     size_t received = 0;
     int64_t deadline = esp_timer_get_time() + 5000000;
     while (received < req->content_len) {
-        if (esp_timer_get_time() >= deadline) return httpd_resp_send_err(req, HTTPD_408_REQ_TIMEOUT, "传输超时");
+        if (esp_timer_get_time() >= deadline) return httpd_resp_send_err(req, HTTPD_408_REQ_TIMEOUT, web_text(req, "传输超时", "Transfer timed out."));
         int count = httpd_req_recv(req, body + received, req->content_len - received);
-        if (count <= 0) return httpd_resp_send_err(req, HTTPD_408_REQ_TIMEOUT, "传输超时");
+        if (count <= 0) return httpd_resp_send_err(req, HTTPD_408_REQ_TIMEOUT, web_text(req, "传输超时", "Transfer timed out."));
         received += count;
     }
     body[received] = 0;
@@ -365,15 +402,15 @@ static esp_err_t put_device(httpd_req_t *req)
     if (cJSON_HasObjectItem(json, "deepSleepSeconds"))
         valid = valid && json_integer(json, "deepSleepSeconds", 300, 1800, &deep_seconds);
     cJSON_Delete(json);
-    if (!valid) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "设置格式有误");
+    if (!valid) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "设置格式有误", "Invalid settings."));
     passport_preferences_t value = {.brightness = brightness, .volume = volume, .sleep_seconds = seconds, .power_mode = mode, .deep_sleep_seconds = deep_seconds};
     esp_err_t err = update_preferences(PREF_DEVICE, &value);
-    if (err == ESP_ERR_INVALID_ARG) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "请选择有效的时间");
+    if (err == ESP_ERR_INVALID_ARG) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "请选择有效的时间", "Select a valid duration."));
     if (err != ESP_OK) {
         ESP_LOGE("settings", "Device settings save: %s", esp_err_to_name(err));
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "保存失败，请重试");
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, web_text(req, "保存失败，请重试", "Unable to save. Try again."));
     }
-    return httpd_resp_sendstr(req, "已保存");
+    return httpd_resp_sendstr(req, web_text(req, "已保存", "Saved"));
 }
 
 static int hex_digit(char ch)
@@ -417,48 +454,54 @@ static esp_err_t put_asset(httpd_req_t *req)
         (!photo && (!read_text(req, "X-Badge-Name", name, sizeof name) ||
                     (has_subtitle && !read_text(req, "X-Badge-Subtitle", subtitle, sizeof subtitle)) ||
                     !read_text(req, "X-Badge-Bio", bio, sizeof bio)))) {
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "资料格式有误");
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "资料格式有误", "Invalid profile data."));
     }
     uint32_t checksum = strtoul(crc, NULL, 16);
     int index = photo ? photo_index(req) : -1;
-    if (photo && index < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "照片位置无效");
+    if (photo && index < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "照片位置无效", "Invalid photo slot."));
+    if (photo) ESP_LOGI("photo_diag", "upload path=%s hotspot_running=%d slot=%d bytes=%u",
+                        from_hotspot(req) ? "hotspot" : "lan", network_hotspot_active(),
+                        index + 1, (unsigned)req->content_len);
     esp_err_t err = photo ? receive_photo(req, index, checksum) :
         receive_badge(req, checksum, name, has_subtitle ? subtitle : NULL, bio);
+    if (photo) ESP_LOGI("photo_diag", "upload result=%s", esp_err_to_name(err));
+    if (photo && err == ESP_ERR_NO_MEM)
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, web_text(req, "卡片暂时没有足够内存处理照片，请稍后重试", "Your Passport is low on memory. Try again shortly."));
     if (err == ESP_ERR_INVALID_SIZE || err == ESP_ERR_INVALID_CRC || err == ESP_ERR_INVALID_ARG)
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "图片格式、长度或校验有误");
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "图片格式、长度或校验有误", "Invalid image format, size or checksum."));
     if (err != ESP_OK)
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "保存失败，旧内容仍可使用");
-    return httpd_resp_sendstr(req, "已同步到卡片");
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, web_text(req, "保存失败，旧内容仍可使用", "Unable to save. Existing content is available."));
+    return httpd_resp_sendstr(req, web_text(req, "已同步到卡片", "Synced to your Passport."));
 }
 
 static esp_err_t delete_photo(httpd_req_t *req)
 {
     if (!permitted(req)) return ESP_OK;
     int index = photo_index(req);
-    if (index < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "照片位置无效");
+    if (index < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "照片位置无效", "Invalid photo slot."));
     if (remove_photo(index) != ESP_OK)
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "删除失败，请重试");
-    return httpd_resp_sendstr(req, "已删除照片");
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, web_text(req, "删除失败，请重试", "Unable to delete. Try again."));
+    return httpd_resp_sendstr(req, web_text(req, "已删除照片", "Photo deleted."));
 }
 
 static esp_err_t delete_badge(httpd_req_t *req)
 {
     if (!permitted(req)) return ESP_OK;
     if (remove_badge() != ESP_OK)
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "身份卡清除失败");
-    return httpd_resp_sendstr(req, "已清除身份卡");
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, web_text(req, "身份卡清除失败", "Unable to clear the ID card."));
+    return httpd_resp_sendstr(req, web_text(req, "已清除身份卡", "ID card cleared."));
 }
 
 static esp_err_t select_album_photo(httpd_req_t *req)
 {
     if (!permitted(req)) return ESP_OK;
     int index = photo_index(req);
-    if (index < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "照片位置无效");
+    if (index < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "照片位置无效", "Invalid photo slot."));
     esp_err_t err = select_photo(index);
     if (err == ESP_ERR_INVALID_ARG)
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "该位置没有照片");
-    if (err != ESP_OK) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "选中照片保存失败");
-    return httpd_resp_sendstr(req, "已选中照片");
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "该位置没有照片", "This slot is empty."));
+    if (err != ESP_OK) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, web_text(req, "选中照片保存失败", "Unable to select the photo."));
+    return httpd_resp_sendstr(req, web_text(req, "已选中照片", "Photo selected."));
 }
 
 static esp_err_t put_wifi(httpd_req_t *req)
@@ -466,7 +509,7 @@ static esp_err_t put_wifi(httpd_req_t *req)
     if (!permitted(req)) return ESP_OK;
     char body[320];
     if (!network_hotspot_active() || !req->content_len || req->content_len >= sizeof body)
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "请在临时热点模式下提交 Wi-Fi 设置");
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "请在临时热点模式下提交 Wi-Fi 设置", "Join the Passport hotspot to configure Wi-Fi."));
     size_t received = 0;
     while (received < req->content_len) {
         int count = httpd_req_recv(req, body + received, req->content_len - received);
@@ -484,14 +527,14 @@ static esp_err_t put_wifi(httpd_req_t *req)
     esp_err_t err = valid ? network_connect(ssid->valuestring, password->valuestring) : ESP_ERR_INVALID_ARG;
     cJSON_Delete(json);
     if (err == ESP_ERR_INVALID_ARG)
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "请检查网络名称和密码");
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "请检查网络名称和密码", "Check the network name and password."));
     if (err == ESP_ERR_INVALID_STATE) {
         httpd_resp_set_status(req, "409 Conflict");
-        return httpd_resp_sendstr(req, "正在扫描或连接，请稍后重试");
+        return httpd_resp_sendstr(req, web_text(req, "正在扫描或连接，请稍后重试", "Wi-Fi is busy. Try again shortly."));
     }
-    if (err != ESP_OK) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "连接请求失败");
+    if (err != ESP_OK) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, web_text(req, "连接请求失败", "Unable to start connecting."));
     httpd_resp_set_status(req, "202 Accepted");
-    return httpd_resp_sendstr(req, "正在连接…");
+    return httpd_resp_sendstr(req, web_text(req, "正在连接…", "Connecting…"));
 }
 
 static esp_err_t put_time(httpd_req_t *req)
@@ -500,13 +543,13 @@ static esp_err_t put_time(httpd_req_t *req)
     char epoch[11], offset[6], *end;
     if (httpd_req_get_hdr_value_str(req, "X-Clock-Epoch", epoch, sizeof epoch) != ESP_OK ||
         httpd_req_get_hdr_value_str(req, "X-Clock-Offset", offset, sizeof offset) != ESP_OK)
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "时间格式有误");
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "时间格式有误", "Invalid time."));
     unsigned long seconds = strtoul(epoch, &end, 10);
     if (*end || seconds < 1700000000 || seconds > 4102444800UL)
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "时间格式有误");
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "时间格式有误", "Invalid time."));
     long minutes = strtol(offset, &end, 10);
     if (*end || minutes < -720 || minutes > 840)
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "时区格式有误");
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, web_text(req, "时区格式有误", "Invalid time zone."));
     set_clock(seconds, minutes);
     return httpd_resp_sendstr(req, "OK");
 }
@@ -517,7 +560,7 @@ static esp_err_t get_network(httpd_req_t *req)
     if (req->method == HTTP_POST) {
         if (network_scan() != ESP_OK) {
             httpd_resp_set_status(req, "409 Conflict");
-            return httpd_resp_sendstr(req, "正在扫描或连接，请稍后重试");
+            return httpd_resp_sendstr(req, web_text(req, "正在扫描或连接，请稍后重试", "Wi-Fi is busy. Try again shortly."));
         }
     }
     network_status_t state = network_status();
@@ -530,7 +573,19 @@ static esp_err_t get_network(httpd_req_t *req)
     cJSON_AddBoolToObject(result, "scanning", state.scanning);
     cJSON_AddBoolToObject(result, "error", state.error);
     cJSON_AddStringToObject(result, "ssid", state.connected_ssid);
-    cJSON_AddStringToObject(result, "message", state.message);
+    const char *message = "";
+    switch (state.message) {
+    case NETWORK_SCAN_FAILED:
+        message = web_text(req, "扫描失败，请重试", "Scan failed. Try again."); break;
+    case NETWORK_CONNECTED_SAVED:
+        message = web_text(req, "已连接并保存，可继续编辑", "Connected and saved. You can continue editing."); break;
+    case NETWORK_SAVE_FAILED:
+        message = web_text(req, "保存失败，原网络已保留", "Unable to save. The previous network was kept."); break;
+    case NETWORK_CONNECT_FAILED:
+        message = web_text(req, "连接失败，请检查密码和网络后重试", "Connection failed. Check the password and try again."); break;
+    case NETWORK_MESSAGE_NONE: break;
+    }
+    cJSON_AddStringToObject(result, "message", message);
     cJSON *entries = cJSON_AddArrayToObject(result, "networks");
     for (unsigned i = 0; i < state.count; ++i) {
         cJSON *item = cJSON_CreateObject();
@@ -569,6 +624,8 @@ esp_err_t web_open(bool force_hotspot)
     static const httpd_uri_t routes[] = {
         {"/", HTTP_GET, page, NULL},
         {"/unlock", HTTP_POST, unlock, NULL},
+        {"/language", HTTP_GET, get_language, NULL},
+        {"/language", HTTP_POST, put_language, NULL},
         {"/network", HTTP_GET, get_network, NULL},
         {"/network", HTTP_POST, get_network, NULL},
         {"/profile", HTTP_GET, get_profile, NULL},

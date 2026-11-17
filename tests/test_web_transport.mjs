@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 const html = readFileSync(new URL('../firmware/main/settings.html', import.meta.url), 'utf8');
+const translate = zh => zh;
 const source = html.split('// BEGIN REQUEST QUEUE')[1].split('// END REQUEST QUEUE')[0];
 const createQueue = vm.runInNewContext(source + '\ncreateRequestQueue', {
-  Promise, AbortController, Response, TextDecoder, TypeError, setTimeout, clearTimeout,
+  translate, Promise, AbortController, Response, TextDecoder, TypeError, setTimeout, clearTimeout,
 });
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 let active = 0, maximum = 0, calls = [];
@@ -45,12 +46,49 @@ await assert.rejects(failed, /连接中断/);
 assert.equal(await (await next).text(), 'ok'); assert.equal(attempts, 3);
 console.log('Web transport tests passed: body serialization, safe GET retry, POST once, 403, body timeout and queue recovery.');
 
+const photoEncoder = html.slice(html.indexOf('const PHOTO_JPEG_LIMIT'), html.indexOf('async function drawPhoto('));
+const {encodePhoto, PHOTO_JPEG_LIMIT} = vm.runInNewContext(photoEncoder + '\n({encodePhoto, PHOTO_JPEG_LIMIT})', {
+  translate, Uint8Array,
+});
+
+function mockPhotoCanvas(sizes, mime = 'image/jpeg') {
+  const qualities = [];
+  let bodyReads = 0;
+  return {
+    qualities,
+    get bodyReads() { return bodyReads; },
+    toBlob(callback, type, quality) {
+      assert.equal(type, 'image/jpeg');
+      qualities.push(quality);
+      const size = sizes[Math.min(qualities.length - 1, sizes.length - 1)];
+      callback({type: mime, size, arrayBuffer: async () => {
+        bodyReads++;
+        return new ArrayBuffer(size);
+      }});
+    },
+  };
+}
+
+const fits = mockPhotoCanvas([PHOTO_JPEG_LIMIT]);
+assert.equal((await encodePhoto(fits)).length, PHOTO_JPEG_LIMIT);
+assert.deepEqual(fits.qualities, [0.90]);
+const detailed = mockPhotoCanvas([PHOTO_JPEG_LIMIT + 1, PHOTO_JPEG_LIMIT + 1, 60 * 1024]);
+assert.equal((await encodePhoto(detailed)).length, 60 * 1024);
+assert.deepEqual(detailed.qualities, [0.90, 0.82, 0.74]);
+assert.equal(detailed.bodyReads, 1);
+const oversize = mockPhotoCanvas([PHOTO_JPEG_LIMIT + 1]);
+await assert.rejects(encodePhoto(oversize), /超过 80 KiB/);
+assert.equal(oversize.qualities.at(-1), 0.40);
+assert.equal(oversize.bodyReads, 0);
+await assert.rejects(encodePhoto(mockPhotoCanvas([32], 'image/png')), /无法生成 JPEG/);
+console.log('Photo encoding tests passed: original quality, compression fallback, and size and MIME limits.');
+
 // 同一份校验函数用于手机浏览器与 Mac 备份窗口。
 const checksum = html.slice(html.indexOf('function crc32('), html.indexOf('async function sendImage('));
 const format = html.slice(html.indexOf('function encodeImage('), html.indexOf('async function backupAction('));
 const deviceKeys = ['brightness', 'volume', 'sleepSeconds', 'powerMode', 'deepSleepSeconds'];
 const {encodeImage, validateBackup} = vm.runInNewContext(checksum + format + '\n({encodeImage, validateBackup})', {
-  btoa, atob, Uint8Array, encoder: new TextEncoder(), deviceKeys,
+  translate, btoa, atob, Uint8Array, encoder: new TextEncoder(), deviceKeys, PHOTO_JPEG_LIMIT,
 });
 const photo = new Uint8Array(153600);
 photo[0] = 91;
@@ -64,15 +102,58 @@ assert.deepEqual(validateBackup(saved).photos[1], photo);
 assert.throws(() => validateBackup({...saved, selectedPhoto: 2}), /目录/);
 assert.throws(() => validateBackup({...saved, version: 99}), /格式/);
 assert.throws(() => validateBackup({...saved, photos: [null, {...saved.photos[1], crc32: '00000000'}, null]}), /校验/);
-assert.throws(() => validateBackup({...saved, device: {...saved.device, deepSleepSeconds: 301}}), /显示设置/);
+assert.throws(() => validateBackup({...saved, device: {...saved.device, deepSleepSeconds: 301}}), /显示与待机设置/);
 assert.equal(validateBackup(saved).photos.length, 6);
+assert.equal(validateBackup(saved).language, undefined);
+assert.equal(validateBackup({...saved, language:'en'}).language, 'en');
+assert.throws(() => validateBackup({...saved, language:'fr'}), /语言设置/);
+assert.throws(() => validateBackup({...saved, identity:{name:5}}), /身份卡文字/);
 const jpeg = new Uint8Array(32);
 jpeg.set([255,216], 0);
 jpeg.set([255,217], jpeg.length - 2);
 const newer = {...saved, version:2, photos:[null, null, null, null, null, encodeImage(jpeg)], selectedPhoto:5};
 assert.deepEqual(validateBackup(newer).photos[5], jpeg);
-const tooBig = new Uint8Array(80 * 1024 + 1);
+const tooBig = new Uint8Array(PHOTO_JPEG_LIMIT + 1);
 tooBig.set([255,216]);
 tooBig.set([255,217], tooBig.length - 2);
 assert.throws(() => validateBackup({...newer, photos:[null,null,null,null,null,encodeImage(tooBig)]}), /尺寸/);
 console.log('Backup format checks passed: byte-for-byte photo, checksum, version and selected-slot validation.');
+
+const between = (start, end) => html.slice(html.indexOf(start), html.indexOf(end, html.indexOf(start)));
+const fields = new Map();
+const field = id => {
+  if (!fields.has(id)) fields.set(id, {disabled:true, hidden:true, dataset:{}, setAttribute() {}});
+  return fields.get(id);
+};
+const writes = [];
+let reloaded = false;
+const languageSandbox = {
+  byId:field, deviceLanguage:'zh-CN', language:'zh-CN', languageOverride:null, translate,
+  request:async (path, options) => {
+    writes.push([path, options.method, options.body]);
+    return new Response(options.body);
+  },
+  reloadDevicePanel() { reloaded = true; },
+};
+vm.runInNewContext(between('async function saveDeviceLanguage', 'const panels ='), languageSandbox);
+field('language').value = 'zh-CN';
+await field('saveLanguage').onclick();
+assert.deepEqual(writes.at(-1), ['/language', 'POST', 'zh-CN']);
+assert.equal(reloaded, false);
+languageSandbox.languageOverride = 'en';
+await vm.runInNewContext("saveDeviceLanguage('en')", languageSandbox);
+assert.deepEqual(writes.at(-1), ['/language', 'POST', 'en']);
+
+const network = vm.runInNewContext(between('async function loadNetworkPanel', 'let profileRequest;') + '\ninitializeDevice', {
+  byId:field, translate,
+  request:async () => new Response(JSON.stringify({brightness:60,volume:40,sleepSeconds:60,powerMode:1,deepSleepSeconds:900,
+    storage:{total:8*1048576,firmware:2.25*1048576,firmwareCapacity:3*1048576,assetsCapacity:1048576,badge:0,photo:0}})),
+  readNetwork:async () => { throw new Error('Network state unavailable'); },
+  updateDevicePreview() {},
+});
+await network();
+assert.equal(field('saveDevice').disabled, false);
+assert.equal(field('storageBar').value, 0.75);
+assert.equal(field('networkRetry').hidden, false);
+assert.equal(field('networkState').textContent, 'Network state unavailable');
+console.log('Settings checks passed: explicit language writes, independent network errors, and app partition usage.');

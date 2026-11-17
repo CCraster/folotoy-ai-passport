@@ -1,4 +1,5 @@
 #include "music.h"
+#include "passport.h"
 
 #include <math.h>
 #include <string.h>
@@ -11,10 +12,15 @@
 #include "nvs.h"
 
 const music_preset_t music_presets[MUSIC_PRESET_COUNT] = {
-    {"清晨", "Morning:d=8,o=5,b=140:c,e,g,4c6"},
-    {"星光", "Starlight:d=16,o=6,b=160:e,g,8c7"},
-    {"跃动", "Bounce:d=16,o=5,b=156:a6,e6,8p,c6,a,8p,8e,8a"},
+    {"清晨", "Morning:d=8,o=5,b=140:c,e,g,4c6", "Morning"},
+    {"星光", "Starlight:d=16,o=6,b=160:e,g,8c7", "Starlight"},
+    {"跃动", "Bounce:d=16,o=5,b=156:a6,e6,8p,c6,a,8p,8e,8a", "Bounce"},
 };
+
+const char *music_preset_name(unsigned selection)
+{
+    return ui_text(music_presets[selection].name, music_presets[selection].english_name);
+}
 
 static boot_music_config_t current = {.enabled = 1};
 static bool completion_enabled = true;
