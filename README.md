@@ -44,7 +44,9 @@
 
 <img src="docs/screenshots/05-game.png" width="420" alt="喵喵快递封面、雨棚落点和长声跨缝">
 
-以上画面由 v1.4.0 固件界面渲染。头像、照片和状态数据为示例。
+以上画面由 v1.4.1 固件界面渲染。头像、照片和状态数据为示例。
+
+v1.4.1 修复了「任务完成提示音」详情页中文标题显示方框的问题。
 
 ### 中英文与设备配置
 
@@ -58,7 +60,7 @@
 
 ## 下载与刷入
 
-在 [v1.4.0 发布页](https://github.com/CCraster/folotoy-ai-passport/releases/tag/v1.4.0) 下载所需文件。
+在 [v1.4.1 发布页](https://github.com/CCraster/folotoy-ai-passport/releases/tag/v1.4.1) 下载所需文件。
 
 | 文件 | 用途 |
 | --- | --- |
